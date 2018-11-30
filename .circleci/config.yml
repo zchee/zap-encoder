@@ -1,0 +1,88 @@
+version: 2.1
+
+orbs:
+  executor: cci-orb/golang@dev:master-5c90288
+
+defaults: &defaults
+  executor: executor/stretch
+  environment:
+    GO111MODULE: 'on'
+  working_directory: /go/src/github.com/zchee/zap-encoder
+
+commands:
+  restore_gomod_cache:
+    steps:
+      - restore_cache:
+          keys:
+            - zap-encoder-go-mod-v1-{{ checksum "go.sum" }}
+  save_gomod_cache:
+    parameters:
+      path:
+        type: string
+        default: '/go/pkg/mod'
+    steps:
+      - save_cache:
+          key: zap-encoder-go-mod-v1-{{ checksum "go.sum" }}
+          paths:
+            - << parameters.path >>
+
+jobs:
+  fetch:
+    <<: *defaults
+    steps:
+      - checkout
+      - restore_gomod_cache
+      - run:
+          name: Run mod/vendor
+          command: |
+            make mod/vendor
+      - save_gomod_cache
+      - persist_to_workspace:
+          root: /go/pkg
+          paths:
+            - "mod/*"
+
+  test:
+    <<: *defaults
+    parallelism: 2
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /go/pkg
+      - run:
+          name: Test and collect coverages
+          command: |
+            make coverage/junit
+      - run:
+          name: Upload coverages to codecov
+          command: |
+            bash <(curl -s https://codecov.io/bash)
+      - store_test_results:
+          path: _test-results
+
+  lint:
+    <<: *defaults
+    parallelism: 2
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /go/pkg
+      - run:
+          name: Run lint for sources
+          command: |
+            make -j$(nproc) lint/ci
+
+workflows:
+  version: 2
+  workflows:
+    jobs:
+      - fetch:
+          context: org-global
+      - test:
+          context: org-global
+          requires:
+            - fetch
+      - lint:
+          context: org-global
+          requires:
+            - fetch

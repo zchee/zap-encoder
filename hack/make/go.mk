@@ -111,14 +111,8 @@ coverage/junit: cmd/go-junit-report  ## Take test coverage and output test resul
 
 lint: lint/fmt lint/govet lint/golint lint/vet lint/golangci-lint  ## Run all linters.
 
-lint/ci/echo:
-	$(call target)
-	@echo $(GO_PKGS)
-
 lint/ci: GO_PKGS=$(shell go list ./... | grep -v -e '.pb.go' | circleci tests split --split-by=timings)
-lint/ci: GO_TEST_PKGS=$(shell go list -f='{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... | circleci tests split --split-by=timings)
-lint/ci: lint/ci/echo lint/fmt lint/govet lint/vet lint/golangci-lint
-	@echo $(GO_PKGS)
+lint/ci: lint/fmt lint/govet lint/golint
 
 .PHONY: lint/fmt
 lint/fmt:  ## Verifies all files have been `gofmt`ed.
@@ -131,7 +125,7 @@ lint/govet:  ## Verifies `go vet` passes.
 	@go vet -all $(GO_PKGS) | tee /dev/stderr
 
 $(GO_PATH)/bin/golint:
-	@go get -u golang.org/x/lint/golint
+	@GO111MODULE=off go get -u golang.org/x/lint/golint
 
 cmd/golint: $(GO_PATH)/bin/golint  # go get 'golint' binary
 
@@ -145,14 +139,14 @@ lint/vet:  ## Run vet
 	@vet $(foreach linter,$(VET_LINTERS),-$(linter).enable) $(GO_PKGS)
 
 $(GO_PATH)/bin/golangci-lint:
-	@go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
+	@GO111MODULE=off go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
 
 cmd/golangci-lint: $(GO_PATH)/bin/golangci-lint  # go get 'golangci-lint' binary
 
 .PHONY: golangci-lint
 lint/golangci-lint: cmd/golangci-lint  ## Run golangci-lint.
 	$(call target)
-	@golangci-lint run --no-config --issues-exit-code=0 $(GOLANGCI_EXCLUDE) --deadline=30m --disable-all $(foreach tool,$(GOLANGCI_LINTERS),--enable=$(tool)) $(GO_PKGS_ABS)
+	@golangci-lint run --no-config --issues-exit-code=0 $(GOLANGCI_EXCLUDE) --deadline=30m --disable-all $(foreach tool,$(GOLANGCI_LINTERS),--enable=$(tool)) $(GO_PKGS)
 
 
 ## mod
