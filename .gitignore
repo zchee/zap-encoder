@@ -45,3 +45,5 @@ _testmain.go
 # coverage
 coverage.*
 
+# vendor
+vendor/
