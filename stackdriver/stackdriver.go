@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -38,6 +39,30 @@ type stackdriverEncoder struct {
 
 	reflectBuf pool.Pooler
 	reflectEnc *json.Encoder
+}
+
+var stackdriverEncoderPool = sync.Pool{
+	New: func() interface{} {
+		return &stackdriverEncoder{}
+	},
+}
+
+func getStackdriverEncoder() *stackdriverEncoder {
+	return stackdriverEncoderPool.Get().(*stackdriverEncoder)
+}
+
+func putStackdriverEncoder(enc *stackdriverEncoder) {
+	if enc.reflectBuf != nil {
+		enc.reflectBuf.Reset()
+	}
+	enc.EncoderConfig = nil
+	enc.buf = nil
+	enc.spaced = false
+	enc.openNamespaces = 0
+	enc.reflectBuf = nil
+	enc.reflectEnc = nil
+
+	stackdriverEncoderPool.Put(enc)
 }
 
 // NewStackdriverEncoder creates a fast, low-allocation JSON encoder. The encoder
