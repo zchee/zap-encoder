@@ -94,7 +94,7 @@ coverage:  ## Take test coverage.
 	$(GO_TEST) -v -tags "$(GO_BUILDTAGS)" -covermode=atomic -coverpkg=$(PKG)/... -coverprofile=coverage.out $(GO_TEST_PKGS)
 
 $(GO_PATH)/bin/go-junit-report:
-	@go get -u github.com/jstemmer/go-junit-report
+	@GO111MODULE=off go get -u github.com/jstemmer/go-junit-report
 
 cmd/go-junit-report: $(GO_PATH)/bin/go-junit-report  # go get 'go-junit-report' binary
 
