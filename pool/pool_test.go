@@ -24,22 +24,10 @@ func TestMapBuffers(t *testing.T) {
 		}
 	})
 
-	t.Run("non-zero capacity", func(t *testing.T) {
-		for i := 0; i < 100; i++ {
-			buf := NewMapPool().Get()
-			if buf.Cap() == 0 {
-				t.Error("Expected non-zero capacity")
-				return
-			}
-			buf.Reset()
-		}
-	})
-
 	t.Run("contain dummy data in buffer", func(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			buf := NewMapPool().Get()
 			buf.AppendString(dummyData)
-			// assert.Equal(t, buf.Len(), len(dummyData), "Expected buffer to contain dummy data")
 			if !cmp.Equal(buf.Len(), len(dummyData)) {
 				t.Error("Expected buffer to contain dummy data")
 			}

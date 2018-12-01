@@ -5,6 +5,8 @@
 package pool
 
 import (
+	"sync"
+
 	"go.uber.org/zap/buffer"
 )
 
@@ -56,11 +58,6 @@ type Pooler interface {
 	// The returns the length of the underlying byte slice.
 	Len() int
 
-	// Cap imitations bytes.Buffer.
-	//
-	// The returns the capacity of the underlying byte slice.
-	Cap() int
-
 	// Truncate imitations bytes.Buffer.
 	//
 	// Truncate discards all but the first n unread bytes from the buffer
@@ -82,4 +79,26 @@ type Pooler interface {
 
 	// TrimNewline trims any final `\n` byte from the end of the buffer.
 	TrimNewline()
+}
+
+// syncMapPool constructs a new sync.Map.
+var syncMapPool = sync.Pool{New: func() interface{} {
+	return new(sync.Map)
+}}
+
+// getSyncMap gets the new sync.Map from syncMapPool pool.
+func getSyncMap() *sync.Map {
+	return syncMapPool.Get().(*sync.Map)
+}
+
+// putSyncMap puts the used sync.Map to syncMapPool pool.
+func putSyncMap(m *sync.Map) {
+	m = new(sync.Map)
+	syncMapPool.Put(m)
+}
+
+func init() {
+	for i := 0; i < 32; i++ {
+		syncMapPool.Put(new(sync.Map))
+	}
 }

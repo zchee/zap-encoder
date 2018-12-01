@@ -73,7 +73,6 @@ func TestMapPoolWrites(t *testing.T) {
 			want: "foo",
 		},
 	}
-
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -91,11 +90,6 @@ func TestMapPoolWrites(t *testing.T) {
 			}
 			if diff := cmp.Diff(len(tc.want), tc.buf.Len()); diff != "" {
 				t.Errorf("%s: Unexpected buffer length: (-got, +want)\n%s\n", tc.name, diff)
-				return
-			}
-			// We're not writing more than a kibibyte in tests.
-			if diff := cmp.Diff(size, tc.buf.Cap()); diff != "" {
-				t.Errorf("%s: Expected buffer capacity to remain constant: (-got, +want)\n%s\n", tc.name, diff)
 			}
 		})
 	}
