@@ -63,19 +63,19 @@ var _ Pooler = (*MapBuffer)(nil)
 // NewMapPool constructs a pooled new MapBuffer.
 func NewMapPool() Pooler {
 	return &MapBuffer{
-		Map: new(sync.Map),
-		Pool: &sync.Pool{New: func() interface{} {
+		m: new(sync.Map),
+		p: &sync.Pool{New: func() interface{} {
 			return &MapBuffer{
-				Pool: new(sync.Pool),
+				p: new(sync.Pool),
 			}
 		}}}
 }
 
 // Get retrieves a Buffer from the pool, creating one if necessary.
 func (mb *MapBuffer) Get() Pooler {
-	buf := mb.Pool.Get().(*MapBuffer)
+	buf := mb.p.Get().(*MapBuffer)
 	buf.Reset()
-	buf.Pool = mb.Pool
+	buf.p = mb.p
 
 	return buf
 }
