@@ -6,79 +6,23 @@ package stackdriver
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"math"
-	"sync"
 	"time"
-	"unicode/utf8"
 
 	sdlogging "cloud.google.com/go/logging"
 	"go.opencensus.io/trace"
+	"go.uber.org/zap"
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
-
-	"github.com/zchee/zap-encoder/pool"
 )
 
-const (
-	// hex for JSON escaping; see stackdriverEncoder.safeAddString.
-	hex = "0123456789abcdef"
-)
-
-type stackdriverEncoder struct {
-	lg  *sdlogging.Logger
-	buf pool.Pooler
-
-	*zapcore.EncoderConfig
-	spaced         bool
-	openNamespaces int
-
-	reflectBuf pool.Pooler
-	reflectEnc *json.Encoder
+type Encoder struct {
+	lg *sdlogging.Logger
+	zapcore.Encoder
 }
 
-//pragma: compiler time checks whether the stackdriverEncoder implemented zapcore.Encoder interface.
-var _ zapcore.Encoder = (*stackdriverEncoder)(nil)
-
-var stackdriverEncoderPool = sync.Pool{
-	New: func() interface{} {
-		return &stackdriverEncoder{}
-	},
-}
-
-func getStackdriverEncoder() *stackdriverEncoder {
-	return stackdriverEncoderPool.Get().(*stackdriverEncoder)
-}
-
-func putStackdriverEncoder(enc *stackdriverEncoder) {
-	if enc.reflectBuf != nil {
-		enc.reflectBuf.Reset()
-	}
-	enc.EncoderConfig = nil
-	enc.buf = nil
-	enc.spaced = false
-	enc.openNamespaces = 0
-	enc.reflectBuf = nil
-	enc.reflectEnc = nil
-
-	stackdriverEncoderPool.Put(enc)
-}
-
-// NewStackdriverEncoder creates a fast, low-allocation JSON encoder. The encoder
-// appropriately escapes all field keys and values.
-//
-// Note that the encoder doesn't deduplicate keys, so it's possible to produce a message like
-//
-//   {"foo":"bar","foo":"baz"}
-//
-// This is permitted by the JSON specification, but not encouraged.
-//
-// Many libraries will ignore duplicate key-value pairs (typically keeping the last
-// pair) when unmarshaling, but users should attempt to avoid adding duplicate
-// keys.
-func NewStackdriverEncoder(ctx context.Context, cfg zapcore.EncoderConfig, projectID, logID string) zapcore.Encoder {
+func NewStackdriverEncoder(ctx context.Context, projectID, logID string) zapcore.Encoder {
 	client, err := sdlogging.NewClient(ctx, projectID)
 	if err != nil {
 		panic(fmt.Errorf("failed to create logging client: %+v", err))
@@ -94,251 +38,70 @@ func NewStackdriverEncoder(ctx context.Context, cfg zapcore.EncoderConfig, proje
 		}
 		return ctx, afterCallFn
 	}
-	sdLogger := client.Logger(logID, sdlogging.ContextFunc(ctxFn))
 
-	return newStackdriverEncoder(cfg, sdLogger, projectID, logID, false)
-}
-
-func newStackdriverEncoder(cfg zapcore.EncoderConfig, lg *sdlogging.Logger, projectID, logID string, spaced bool) (sde *stackdriverEncoder) {
-	sde = &stackdriverEncoder{
-		lg:  lg,
-		buf: pool.NewMapPool(),
-
-		EncoderConfig: &cfg,
-		spaced:        spaced,
-	}
-
-	return sde
-}
-
-func (enc *stackdriverEncoder) AddArray(key string, arr zapcore.ArrayMarshaler) error {
-	enc.addKey(key)
-	return enc.AppendArray(arr)
-}
-
-func (enc *stackdriverEncoder) AddObject(key string, obj zapcore.ObjectMarshaler) error {
-	enc.addKey(key)
-	return enc.AppendObject(obj)
-}
-
-func (enc *stackdriverEncoder) AddBinary(key string, val []byte) {
-	enc.AddString(key, base64.StdEncoding.EncodeToString(val))
-}
-
-func (enc *stackdriverEncoder) AddByteString(key string, val []byte) {
-	enc.addKey(key)
-	enc.AppendByteString(val)
-}
-
-func (enc *stackdriverEncoder) AddBool(key string, val bool) {
-	enc.addKey(key)
-	enc.AppendBool(val)
-}
-
-func (enc *stackdriverEncoder) AddComplex128(key string, val complex128) {
-	enc.addKey(key)
-	enc.AppendComplex128(val)
-}
-
-func (enc *stackdriverEncoder) AddDuration(key string, val time.Duration) {
-	enc.addKey(key)
-	enc.AppendDuration(val)
-}
-
-func (enc *stackdriverEncoder) AddFloat64(key string, val float64) {
-	enc.addKey(key)
-	enc.AppendFloat64(val)
-}
-
-func (enc *stackdriverEncoder) AddInt64(key string, val int64) {
-	enc.addKey(key)
-	enc.AppendInt64(val)
-}
-
-func (enc *stackdriverEncoder) resetReflectBuf() {
-	if enc.reflectBuf == nil {
-		enc.reflectBuf = pool.NewMapPool()
-		enc.reflectEnc = json.NewEncoder(enc.reflectBuf)
-	} else {
-		enc.reflectBuf.Reset()
+	return &Encoder{
+		lg:      client.Logger(logID, sdlogging.ContextFunc(ctxFn)),
+		Encoder: zapcore.NewJSONEncoder(NewStackdriverEncoderConfig()),
 	}
 }
 
-// AddReflected uses reflection to serialize arbitrary objects, so it's slow
-// and allocation-heavy.
-func (enc *stackdriverEncoder) AddReflected(key string, obj interface{}) error {
-	enc.resetReflectBuf()
-	err := enc.reflectEnc.Encode(obj)
-	if err != nil {
-		return err
-	}
-	enc.reflectBuf.TrimNewline()
-	enc.addKey(key)
-	_, err = enc.buf.Write(enc.reflectBuf.Bytes())
-
-	return err
-}
-
-// OpenNamespace opens an isolated namespace where all subsequent fields will
-// be added. Applications can use namespaces to prevent key collisions when
-// injecting loggers into sub-components or third-party libraries.
-func (enc *stackdriverEncoder) OpenNamespace(key string) {
-	enc.addKey(key)
-	enc.buf.AppendByte('{')
-	enc.openNamespaces++
-}
-
-func (enc *stackdriverEncoder) AddString(key, val string) {
-	enc.addKey(key)
-	enc.AppendString(val)
-}
-
-func (enc *stackdriverEncoder) AddTime(key string, val time.Time) {
-	enc.addKey(key)
-	enc.AppendTime(val)
-}
-
-func (enc *stackdriverEncoder) AddUint64(key string, val uint64) {
-	enc.addKey(key)
-	enc.AppendUint64(val)
-}
-
-func (enc *stackdriverEncoder) AppendArray(arr zapcore.ArrayMarshaler) error {
-	enc.addElementSeparator()
-	enc.buf.AppendByte('[')
-	err := arr.MarshalLogArray(enc)
-	enc.buf.AppendByte(']')
-	return err
-}
-
-func (enc *stackdriverEncoder) AppendObject(obj zapcore.ObjectMarshaler) error {
-	enc.addElementSeparator()
-	enc.buf.AppendByte('{')
-	err := obj.MarshalLogObject(enc)
-	enc.buf.AppendByte('}')
-	return err
-}
-
-func (enc *stackdriverEncoder) AppendBool(val bool) {
-	enc.addElementSeparator()
-	enc.buf.AppendBool(val)
-}
-
-func (enc *stackdriverEncoder) AppendByteString(val []byte) {
-	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
-	enc.safeAddByteString(val)
-	enc.buf.AppendByte('"')
-}
-
-func (enc *stackdriverEncoder) AppendComplex128(val complex128) {
-	enc.addElementSeparator()
-	// Cast to a platform-independent, fixed-size type.
-	r, i := float64(real(val)), float64(imag(val))
-	enc.buf.AppendByte('"')
-	// Because we're always in a quoted string, we can use strconv without
-	// special-casing NaN and +/-Inf.
-	enc.buf.AppendFloat(r, 64)
-	enc.buf.AppendByte('+')
-	enc.buf.AppendFloat(i, 64)
-	enc.buf.AppendByte('i')
-	enc.buf.AppendByte('"')
-}
-
-func (enc *stackdriverEncoder) AppendDuration(val time.Duration) {
-	cur := enc.buf.Len()
-	enc.EncodeDuration(val, enc)
-	if cur == enc.buf.Len() {
-		// User-supplied EncodeDuration is a no-op. Fall back to nanoseconds to keep
-		// JSON valid.
-		enc.AppendInt64(int64(val))
+// NewStackdriverConfig ...
+func NewStackdriverConfig() zap.Config {
+	return zap.Config{
+		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
+		Development: false,
+		Sampling: &zap.SamplingConfig{
+			Initial:    100,
+			Thereafter: 100,
+		},
+		Encoding:         "stackdriver",
+		EncoderConfig:    NewStackdriverEncoderConfig(),
+		OutputPaths:      []string{"stdout"},
+		ErrorOutputPaths: []string{"stdout"},
 	}
 }
 
-func (enc *stackdriverEncoder) AppendInt64(val int64) {
-	enc.addElementSeparator()
-	enc.buf.AppendInt(val)
-}
-
-func (enc *stackdriverEncoder) AppendReflected(val interface{}) error {
-	enc.resetReflectBuf()
-	err := enc.reflectEnc.Encode(val)
-	if err != nil {
-		return err
+func NewStackdriverEncoderConfig() zapcore.EncoderConfig {
+	return zapcore.EncoderConfig{
+		TimeKey:       "eventTime",
+		LevelKey:      "severity",
+		NameKey:       "logger",
+		CallerKey:     "caller",
+		MessageKey:    "message",
+		StacktraceKey: "trace",
+		LineEnding:    zapcore.DefaultLineEnding,
+		EncodeLevel: func(l zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
+			switch l {
+			case zapcore.DebugLevel:
+				enc.AppendString("DEBUG")
+			case zapcore.InfoLevel:
+				enc.AppendString("INFO")
+			case zapcore.WarnLevel:
+				enc.AppendString("WARNING")
+			case zapcore.ErrorLevel:
+				enc.AppendString("ERROR")
+			case zapcore.DPanicLevel:
+				enc.AppendString("CRITICAL")
+			case zapcore.PanicLevel:
+				enc.AppendString("ALERT")
+			case zapcore.FatalLevel:
+				enc.AppendString("EMERGENCY")
+			}
+		},
+		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
 	}
-	enc.reflectBuf.TrimNewline()
-	enc.addElementSeparator()
-	_, err = enc.buf.Write(enc.reflectBuf.Bytes())
-	return err
 }
 
-func (enc *stackdriverEncoder) AppendString(val string) {
-	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
-	enc.safeAddString(val)
-	enc.buf.AppendByte('"')
-}
-
-func (enc *stackdriverEncoder) AppendTime(val time.Time) {
-	cur := enc.buf.Len()
-	enc.EncodeTime(val, enc)
-	if cur == enc.buf.Len() {
-		// User-supplied EncodeTime is a no-op. Fall back to nanos since epoch to keep
-		// output JSON valid.
-		enc.AppendInt64(val.UnixNano())
+func (e *Encoder) Clone() zapcore.Encoder {
+	return &Encoder{
+		lg:      e.lg,
+		Encoder: e.Encoder.Clone(),
 	}
 }
 
-func (enc *stackdriverEncoder) AppendUint64(val uint64) {
-	enc.addElementSeparator()
-	enc.buf.AppendUint(val)
-}
-
-func (enc *stackdriverEncoder) AddComplex64(k string, v complex64) {
-	enc.AddComplex128(k, complex128(v))
-}
-func (enc *stackdriverEncoder) AddFloat32(k string, v float32) { enc.AddFloat64(k, float64(v)) }
-func (enc *stackdriverEncoder) AddInt(k string, v int)         { enc.AddInt64(k, int64(v)) }
-func (enc *stackdriverEncoder) AddInt32(k string, v int32)     { enc.AddInt64(k, int64(v)) }
-func (enc *stackdriverEncoder) AddInt16(k string, v int16)     { enc.AddInt64(k, int64(v)) }
-func (enc *stackdriverEncoder) AddInt8(k string, v int8)       { enc.AddInt64(k, int64(v)) }
-func (enc *stackdriverEncoder) AddUint(k string, v uint)       { enc.AddUint64(k, uint64(v)) }
-func (enc *stackdriverEncoder) AddUint32(k string, v uint32)   { enc.AddUint64(k, uint64(v)) }
-func (enc *stackdriverEncoder) AddUint16(k string, v uint16)   { enc.AddUint64(k, uint64(v)) }
-func (enc *stackdriverEncoder) AddUint8(k string, v uint8)     { enc.AddUint64(k, uint64(v)) }
-func (enc *stackdriverEncoder) AddUintptr(k string, v uintptr) { enc.AddUint64(k, uint64(v)) }
-func (enc *stackdriverEncoder) AppendComplex64(v complex64)    { enc.AppendComplex128(complex128(v)) }
-func (enc *stackdriverEncoder) AppendFloat64(v float64)        { enc.appendFloat(v, 64) }
-func (enc *stackdriverEncoder) AppendFloat32(v float32)        { enc.appendFloat(float64(v), 32) }
-func (enc *stackdriverEncoder) AppendInt(v int)                { enc.AppendInt64(int64(v)) }
-func (enc *stackdriverEncoder) AppendInt32(v int32)            { enc.AppendInt64(int64(v)) }
-func (enc *stackdriverEncoder) AppendInt16(v int16)            { enc.AppendInt64(int64(v)) }
-func (enc *stackdriverEncoder) AppendInt8(v int8)              { enc.AppendInt64(int64(v)) }
-func (enc *stackdriverEncoder) AppendUint(v uint)              { enc.AppendUint64(uint64(v)) }
-func (enc *stackdriverEncoder) AppendUint32(v uint32)          { enc.AppendUint64(uint64(v)) }
-func (enc *stackdriverEncoder) AppendUint16(v uint16)          { enc.AppendUint64(uint64(v)) }
-func (enc *stackdriverEncoder) AppendUint8(v uint8)            { enc.AppendUint64(uint64(v)) }
-func (enc *stackdriverEncoder) AppendUintptr(v uintptr)        { enc.AppendUint64(uint64(v)) }
-
-func (enc *stackdriverEncoder) Clone() zapcore.Encoder {
-	clone := enc.clone()
-	clone.buf.Write(enc.buf.Bytes())
-
-	return clone
-}
-
-func (enc *stackdriverEncoder) clone() *stackdriverEncoder {
-	clone := getStackdriverEncoder()
-	clone.lg = enc.lg
-	clone.EncoderConfig = enc.EncoderConfig
-	clone.spaced = enc.spaced
-	clone.openNamespaces = enc.openNamespaces
-	clone.buf = pool.NewMapPool()
-
-	return clone
-}
-
-func (stackdriverEncoder) parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
+func (Encoder) parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 	switch l {
 	case zapcore.DebugLevel:
 		sev = sdlogging.Debug
@@ -361,178 +124,93 @@ func (stackdriverEncoder) parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 	return sev
 }
 
-func addFields(enc zapcore.ObjectEncoder, fields []zapcore.Field) {
-	for i := range fields {
-		fields[i].AddTo(enc)
-	}
-}
-
-func (enc *stackdriverEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	final := enc.clone()
-	final.buf.AppendByte('{')
-
-	addFields(final, fields)
-	final.closeOpenNamespaces()
-
-	if ent.Message != "" {
-		enc.AddString("msg", ent.Message)
+func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
+	if ent.Caller.Defined {
+		for _, f := range fields {
+			if f.Key == "error" && f.Type == zapcore.ErrorType {
+				ent.Message = ent.Message + "\ndue to error: " + f.Interface.(error).Error()
+			}
+		}
 	}
 
-	ret := final.buf
-	putStackdriverEncoder(final)
+	if ent.Caller.Defined {
+		fields = append(fields, zap.Object("sourceLocation", reportLocation{
+			File: ent.Caller.File,
+			Line: ent.Caller.Line,
+		}))
+		ent.Caller.Defined = false
+	}
 
-	e := sdlogging.Entry{
+	if ent.Stack != "" {
+		ent.Message = ent.Message + "\n" + ent.Stack
+		ent.Stack = ""
+	}
+
+	buf, err := e.Encoder.EncodeEntry(ent, fields)
+
+	entry := sdlogging.Entry{
 		Timestamp: ent.Time,
-		Payload:   ret,
-		Severity:  enc.parseLevel(ent.Level),
+		Payload:   buf.String(),
+		Severity:  e.parseLevel(ent.Level),
 	}
-	enc.lg.Log(e)
+	e.lg.Log(entry)
 
-	return enc.buf.GetBuffer(), nil
+	return buf, err
 }
 
-func (enc *stackdriverEncoder) truncate() {
-	enc.buf.Reset()
+type ServiceContext struct {
+	Service string `json:"service"`
+	Version string `json:"version"`
 }
 
-func (enc *stackdriverEncoder) closeOpenNamespaces() {
-	for i := 0; i < enc.openNamespaces; i++ {
-		enc.buf.AppendByte('}')
+// MarshalLogObject implements zapcore ObjectMarshaler.
+func (sc ServiceContext) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	if sc.Service == "" {
+		return errors.New("service name is mandatory")
 	}
+	enc.AddString("service", sc.Service)
+	enc.AddString("version", sc.Version)
+
+	return nil
 }
 
-func (enc *stackdriverEncoder) addKey(key string) {
-	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
-	enc.safeAddString(key)
-	enc.buf.AppendByte('"')
-	enc.buf.AppendByte(':')
-	if enc.spaced {
-		enc.buf.AppendByte(' ')
+// LINK: https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#HttpRequest
+type HTTPRequest struct {
+	Method    string
+	URL       string
+	UserAgent string
+	Referrer  string
+	Status    int
+	RemoteIP  string
+	Latency   time.Duration
+}
+
+// MarshalLogObject implements zapcore ObjectMarshaler.
+func (req HTTPRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("requestMethod", req.Method)
+	enc.AddString("requestUrl", req.URL)
+	enc.AddString("userAgent", req.UserAgent)
+	enc.AddString("referrer", req.Referrer)
+	enc.AddString("remoteIp", req.RemoteIP)
+	enc.AddInt("status", req.Status)
+	enc.AddString("latency", fmt.Sprintf("%gs", req.Latency.Seconds()))
+
+	return nil
+}
+
+type reportLocation struct {
+	File     string
+	Line     int
+	Function string
+}
+
+// MarshalLogObject implements zapcore ObjectMarshaler.
+func (rl reportLocation) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("file", rl.File)
+	enc.AddInt("line", rl.Line)
+	if rl.Function != "" {
+		enc.AddString("function", rl.Function)
 	}
-}
 
-func (enc *stackdriverEncoder) addElementSeparator() {
-	last := enc.buf.Len() - 1
-	if last < 0 {
-		return
-	}
-	switch enc.buf.Bytes()[last] {
-	case '{', '[', ':', ',', ' ':
-		return
-	default:
-		enc.buf.AppendByte(',')
-		if enc.spaced {
-			enc.buf.AppendByte(' ')
-		}
-	}
-}
-
-func (enc *stackdriverEncoder) appendFloat(val float64, bitSize int) {
-	enc.addElementSeparator()
-	switch {
-	case math.IsNaN(val):
-		enc.buf.AppendString(`"NaN"`)
-	case math.IsInf(val, 1):
-		enc.buf.AppendString(`"+Inf"`)
-	case math.IsInf(val, -1):
-		enc.buf.AppendString(`"-Inf"`)
-	default:
-		enc.buf.AppendFloat(val, bitSize)
-	}
-}
-
-// safeAddString JSON-escapes a string and appends it to the internal buffer.
-// Unlike the standard library's encoder, it doesn't attempt to protect the
-// user from browser vulnerabilities or JSONP-related problems.
-func (enc *stackdriverEncoder) safeAddString(s string) {
-	for i := 0; i < len(s); {
-		if enc.tryAddRuneSelf(s[i]) {
-			i++
-			continue
-		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if enc.tryAddRuneError(r, size) {
-			i++
-			continue
-		}
-		enc.buf.AppendString(s[i : i+size])
-		i += size
-	}
-}
-
-// safeAddByteString is no-alloc equivalent of safeAddString(string(s)) for s []byte.
-func (enc *stackdriverEncoder) safeAddByteString(s []byte) {
-	for i := 0; i < len(s); {
-		if enc.tryAddRuneSelf(s[i]) {
-			i++
-			continue
-		}
-		r, size := utf8.DecodeRune(s[i:])
-		if enc.tryAddRuneError(r, size) {
-			i++
-			continue
-		}
-		enc.buf.Write(s[i : i+size])
-		i += size
-	}
-}
-
-// tryAddRuneSelf appends b if it is valid UTF-8 character represented in a single byte.
-func (enc *stackdriverEncoder) tryAddRuneSelf(b byte) bool {
-	if b >= utf8.RuneSelf {
-		return false
-	}
-	if 0x20 <= b && b != '\\' && b != '"' {
-		enc.buf.AppendByte(b)
-		return true
-	}
-	switch b {
-	case '\\', '"':
-		enc.buf.AppendByte('\\')
-		enc.buf.AppendByte(b)
-	case '\n':
-		enc.buf.AppendByte('\\')
-		enc.buf.AppendByte('n')
-	case '\r':
-		enc.buf.AppendByte('\\')
-		enc.buf.AppendByte('r')
-	case '\t':
-		enc.buf.AppendByte('\\')
-		enc.buf.AppendByte('t')
-	default:
-		// Encode bytes < 0x20, except for the escape sequences above.
-		enc.buf.AppendString(`\u00`)
-		enc.buf.AppendByte(hex[b>>4])
-		enc.buf.AppendByte(hex[b&0xF])
-	}
-	return true
-}
-
-func (enc *stackdriverEncoder) tryAddRuneError(r rune, size int) bool {
-	if r == utf8.RuneError && size == 1 {
-		enc.buf.AppendString(`\ufffd`)
-		return true
-	}
-	return false
-}
-
-func (enc *stackdriverEncoder) Put() {
-	enc.buf = pool.NewMapPool() // no-op
-}
-
-type stackdriverWriterSyncer struct {
-	lg *sdlogging.Logger
-}
-
-//pragma: compiler time checks whether the stackdriverWriterSyncer implemented zapcore interface.
-var _ zapcore.WriteSyncer = (*stackdriverWriterSyncer)(nil)
-
-func (g *stackdriverWriterSyncer) Write(b []byte) (int, error) {
-	// devnull, the encoder does the work
-	return len(b), nil
-}
-
-func (g *stackdriverWriterSyncer) Sync() error {
-	return g.lg.Flush()
+	return nil
 }
