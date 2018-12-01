@@ -15,8 +15,8 @@ type Pooler interface {
 	// Get retrieves a Pooler, creating one if necessary.
 	Get() Pooler
 
-	// GetBuffer returns the zap *buffer.Buffer.
-	GetBuffer() *buffer.Buffer
+	// Buffer returns the zap *buffer.Buffer.
+	Buffer() *buffer.Buffer
 
 	// Put returns the Pooler to its Pool.
 	//
