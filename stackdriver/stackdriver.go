@@ -18,8 +18,6 @@ import (
 	"go.opencensus.io/trace"
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
-	"google.golang.org/api/option"
-	"google.golang.org/grpc"
 
 	"github.com/zchee/zap-encoder/pool"
 )
@@ -108,28 +106,6 @@ func newStackdriverEncoder(cfg zapcore.EncoderConfig, lg *sdlogging.Logger, proj
 
 		EncoderConfig: &cfg,
 		spaced:        spaced,
-	}
-
-	return sde
-}
-
-// New creates a fast, low-allocation JSON encoder.
-func New(ctx context.Context, projectID, logID string) zapcore.Encoder {
-	client, err := sdlogging.NewClient(ctx, projectID, option.WithGRPCDialOption(grpc.WithTimeout(5*time.Second)))
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create logging client: %v", err))
-	}
-	client.OnError = func(err error) {}
-
-	lg := client.Logger(logID)
-
-	return newEncoder(lg)
-}
-
-func newEncoder(lg *sdlogging.Logger) (sde *stackdriverEncoder) {
-	sde = &stackdriverEncoder{
-		lg:  lg,
-		buf: pool.NewMapPool(),
 	}
 
 	return sde
