@@ -321,15 +321,21 @@ func (enc *stackdriverEncoder) AppendUint8(v uint8)            { enc.AppendUint6
 func (enc *stackdriverEncoder) AppendUintptr(v uintptr)        { enc.AppendUint64(uint64(v)) }
 
 func (enc *stackdriverEncoder) Clone() zapcore.Encoder {
-	_ = pool.NewMapPool()
-	// for k, v := range enc.buf {
-	// 	buf[k] = v
-	// }
+	clone := enc.clone()
+	clone.buf.Write(enc.buf.Bytes())
 
-	return &stackdriverEncoder{
-		lg:  enc.lg,
-		buf: enc.buf,
-	}
+	return clone
+}
+
+func (enc *stackdriverEncoder) clone() *stackdriverEncoder {
+	clone := getStackdriverEncoder()
+	clone.lg = enc.lg
+	clone.EncoderConfig = enc.EncoderConfig
+	clone.spaced = enc.spaced
+	clone.openNamespaces = enc.openNamespaces
+	clone.buf = pool.NewMapPool()
+
+	return clone
 }
 
 func (stackdriverEncoder) parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
@@ -355,82 +361,30 @@ func (stackdriverEncoder) parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 	return sev
 }
 
-func (enc *stackdriverEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	sev := enc.parseLevel(entry.Level)
-
-	buf := pool.NewMapPool()
-	// for k, v := range enc.buf {
-	// 	buf[k] = v
-	// }
-
-	for _, f := range fields {
-		switch f.Type {
-		case zapcore.ArrayMarshalerType:
-			//TODO:
-		case zapcore.ObjectMarshalerType:
-			//TODO:
-		case zapcore.BinaryType:
-			// buf[f.Key] = f.Interface
-		case zapcore.BoolType:
-			// buf[f.Key] = f.Integer == 1
-		case zapcore.ByteStringType:
-			// buf[f.Key] = f.Interface
-		case zapcore.Complex128Type:
-			// buf[f.Key] = f.Interface
-		case zapcore.Complex64Type:
-			// buf[f.Key] = f.Interface
-		case zapcore.DurationType:
-			// buf[f.Key] = time.Duration(f.Integer).Seconds()
-		case zapcore.Float64Type:
-			// buf[f.Key] = math.Float64frombits(uint64(f.Integer))
-		case zapcore.Float32Type:
-			// buf[f.Key] = math.Float32frombits(uint32(f.Integer))
-		case zapcore.Int64Type:
-			// buf[f.Key] = f.Integer
-		case zapcore.Int32Type:
-			// buf[f.Key] = f.Integer
-		case zapcore.Int16Type:
-			// buf[f.Key] = f.Integer
-		case zapcore.Int8Type:
-			// buf[f.Key] = f.Integer
-		case zapcore.StringType:
-			// buf[f.Key] = f.String
-		case zapcore.TimeType:
-			// if f.Interface != nil {
-			// 	buf[f.Key] = time.Unix(0, f.Integer).In(f.Interface.(*time.Location))
-			// } else {
-			// 	// Fall back to UTC if location is nil.
-			// 	buf[f.Key] = time.Unix(0, f.Integer)
-			// }
-		case zapcore.Uint64Type:
-			// buf[f.Key] = f.Integer
-		case zapcore.Uint32Type:
-			// buf[f.Key] = f.Integer
-		case zapcore.Uint16Type:
-			// buf[f.Key] = f.Integer
-		case zapcore.Uint8Type:
-			// buf[f.Key] = f.Integer
-		case zapcore.UintptrType:
-			// buf[f.Key] = f.Integer
-		case zapcore.ReflectType:
-			// buf[f.Key] = f.Interface
-		case zapcore.NamespaceType:
-			//TODO
-		case zapcore.StringerType:
-			// buf[f.Key] = f.Interface.(fmt.Stringer).String()
-		case zapcore.ErrorType:
-			// buf[f.Key] = f.Interface.(error).Error()
-		case zapcore.SkipType:
-			// break
-
-		}
+func addFields(enc zapcore.ObjectEncoder, fields []zapcore.Field) {
+	for i := range fields {
+		fields[i].AddTo(enc)
 	}
-	// buf["msg"] = entry.Message
+}
+
+func (enc *stackdriverEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
+	final := enc.clone()
+	final.buf.AppendByte('{')
+
+	addFields(final, fields)
+	final.closeOpenNamespaces()
+
+	if ent.Message != "" {
+		enc.AddString("msg", ent.Message)
+	}
+
+	ret := final.buf
+	putStackdriverEncoder(final)
 
 	e := sdlogging.Entry{
-		Timestamp: entry.Time,
-		Payload:   buf,
-		Severity:  sev,
+		Timestamp: ent.Time,
+		Payload:   ret,
+		Severity:  enc.parseLevel(ent.Level),
 	}
 	enc.lg.Log(e)
 
