@@ -1,7 +1,5 @@
 module github.com/zchee/zap-encoder
 
-go 1.12
-
 require (
 	cloud.google.com/go v0.33.1
 	github.com/davecgh/go-spew v1.1.1 // indirect
