@@ -27,8 +27,9 @@ commands:
             - << parameters.path >>
 
 jobs:
-  fetch:
+  test:
     <<: *defaults
+    parallelism: 2
     steps:
       - checkout
       - restore_gomod_cache
@@ -37,21 +38,10 @@ jobs:
           command: |
             make mod/vendor
       - save_gomod_cache
-      - persist_to_workspace:
-          root: /go/pkg
-          paths:
-            - "mod/*"
-
-  test:
-    <<: *defaults
-    parallelism: 2
-    steps:
-      - checkout
-      - attach_workspace:
-          at: /go/pkg
       - run:
           name: Test and collect coverages
           command: |
+            make coverage
             make coverage/junit
       - run:
           name: Upload coverages to codecov
@@ -65,8 +55,12 @@ jobs:
     parallelism: 2
     steps:
       - checkout
-      - attach_workspace:
-          at: /go/pkg
+      - restore_gomod_cache
+      - run:
+          name: Run mod/vendor
+          command: |
+            make mod/vendor
+      - save_gomod_cache
       - run:
           name: Run lint for sources
           command: |
@@ -76,13 +70,7 @@ workflows:
   version: 2
   workflows:
     jobs:
-      - fetch:
-          context: org-global
       - test:
           context: org-global
-          requires:
-            - fetch
       - lint:
           context: org-global
-          requires:
-            - fetch
