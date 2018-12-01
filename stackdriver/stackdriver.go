@@ -41,6 +41,9 @@ type stackdriverEncoder struct {
 	reflectEnc *json.Encoder
 }
 
+//pragma: compiler time checks whether the stackdriverEncoder implemented zapcore.Encoder interface.
+var _ zapcore.Encoder = (*stackdriverEncoder)(nil)
+
 var stackdriverEncoderPool = sync.Pool{
 	New: func() interface{} {
 		return &stackdriverEncoder{}
@@ -591,6 +594,9 @@ func (enc *stackdriverEncoder) Put() {
 type stackdriverWriterSyncer struct {
 	lg *sdlogging.Logger
 }
+
+//pragma: compiler time checks whether the stackdriverWriterSyncer implemented zapcore interface.
+var _ zapcore.WriteSyncer = (*stackdriverWriterSyncer)(nil)
 
 func (g *stackdriverWriterSyncer) Write(b []byte) (int, error) {
 	// devnull, the encoder does the work
