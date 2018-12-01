@@ -150,21 +150,13 @@ lint/golangci-lint: cmd/golangci-lint  ## Run golangci-lint.
 
 ## mod
 
-go.mod:
+mod/init:
 	$(call target,mod/init)
 	@GO111MODULE=on go mod init
 
-mod/init: go.mod
-
-go.sum: go.mod
-	$(call target,mod/tidy)
-	@GO111MODULE=on go mod tidy -v
-
-mod/fetch:
+mod/tidy:
 	$(call target)
-	@GO111MODULE=on go get -m -u -v
-
-mod/tidy: go.mod go.sum mod/fetch
+	@GO111MODULE=on go mod tidy -v
 
 mod/vendor: go.mod go.sum
 	$(call target)
@@ -176,7 +168,7 @@ mod/clean:
 	@$(RM) go.mod go.sum
 	@$(RM) -r vendor
 
-mod: mod/clean mod/init mod/fetch mod/tidy mod/vendor  ## Updates the vendoring directory via go mod.
+mod: mod/clean mod/init mod/tidy mod/vendor  ## Updates the vendoring directory via go mod.
 
 
 ## dep
