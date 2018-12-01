@@ -99,7 +99,6 @@ $(GO_PATH)/bin/go-junit-report:
 cmd/go-junit-report: $(GO_PATH)/bin/go-junit-report  # go get 'go-junit-report' binary
 
 .PHONY: coverage/junit
-coverage/junit: GO_TEST_PKGS=$(shell go list -f='{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... | circleci tests split --split-by=timings)
 coverage/junit: cmd/go-junit-report  ## Take test coverage and output test results with junit syntax.
 	$(call target)
 	@echo $(GO_TEST_PKGS)
