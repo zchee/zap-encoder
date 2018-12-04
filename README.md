@@ -6,7 +6,7 @@ zap-encoder implements a converts zap logging format to any service encoding sty
 
 
 ## Support status
-- [ ] Stackdriver LogEntry
+- [x] Stackdriver LogEntry
 - [ ] BigQuery schema
 
 
