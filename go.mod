@@ -15,6 +15,6 @@ require (
 	go.uber.org/multierr v1.1.0 // indirect
 	go.uber.org/zap v1.9.1
 	golang.org/x/exp/errors v0.0.0-20181204140929-2a5c3a01c7f1
-	golang.org/x/oauth2 v0.0.0-20181203162652-d668ce993890 // indirect
+	golang.org/x/oauth2 v0.0.0-20181203162652-d668ce993890
 	google.golang.org/appengine v1.3.0 // indirect
 )
