@@ -20,11 +20,13 @@ GO_TEST_FLAGS ?=
 GO_BENCH_FUNC ?= .
 GO_BENCH_FLAGS ?= -benchmem
 
-VET_LINTERS := asmdecl assign atomic bools buildtag cgocall copylocks httpresponse loopclosure lostcancel nilfunc nilness pkgfact shift stdmethods structtag tests unreachable unsafeptr  # composites -composites.whitelist '' findcall -findcall.name '' printf -printf.funcs '' unusedresult -unusedresult.funcs '' -unusedresult.stringmethods ''
-GOLANGCI_LINTERS := deadcode dupl errcheck goconst gocyclo golint gosec ineffassign interfacer maligned megacheck structcheck unconvert varcheck 
-GOLANGCI_EXCLUDE :=
-ifneq ($(wildcard '.errcheckignore'),)
-	GOLANGCI_EXCLUDE = $(foreach pat,$(shell cat .errcheckignore),--exclude '$(pat)')
+GOLANGCI_EXCLUDE ?=
+ifeq ($(wildcard '.errcheckignore'),)
+	GOLANGCI_EXCLUDE=$(foreach pat,$(shell cat .errcheckignore),--exclude '$(pat)')
+endif
+GOLANGCI_CONFIG ?=
+ifeq ($(wildcard '.golangci.yml'),)
+	GOLANGCI_CONFIG+=--config .golangci.yml
 endif
 
 # ----------------------------------------------------------------------------
@@ -108,7 +110,7 @@ coverage/junit: cmd/go-junit-report  ## Take test coverage and output test resul
 
 ## lint
 
-lint: lint/fmt lint/govet lint/golint lint/vet lint/golangci-lint  ## Run all linters.
+lint: lint/fmt lint/govet lint/golint lint/golangci-lint  ## Run all linters.
 
 lint/ci: GO_PKGS=$(shell go list ./... | grep -v -e '.pb.go' | circleci tests split --split-by=timings)
 lint/ci: lint/fmt lint/govet lint/golint
@@ -133,19 +135,16 @@ lint/golint: cmd/golint  ## Verifies `golint` passes.
 	$(call target)
 	@golint -min_confidence=0.3 -set_exit_status $(GO_PKGS)
 
-lint/vet:  ## Run vet
-	$(call target)
-	@vet $(foreach linter,$(VET_LINTERS),-$(linter).enable) $(GO_PKGS)
-
 $(GO_PATH)/bin/golangci-lint:
 	@GO111MODULE=off go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
 
-cmd/golangci-lint: $(GO_PATH)/bin/golangci-lint  # go get 'golangci-lint' binary
+.PHONY: cmd/golangci-lint
+cmd/golangci-lint: $(GO_PATH)/bin/golangci-lint
 
 .PHONY: golangci-lint
 lint/golangci-lint: cmd/golangci-lint  ## Run golangci-lint.
 	$(call target)
-	@golangci-lint run --no-config --issues-exit-code=0 $(GOLANGCI_EXCLUDE) --deadline=30m --disable-all $(foreach tool,$(GOLANGCI_LINTERS),--enable=$(tool)) $(GO_PKGS)
+	@golangci-lint run $(strip $(GOLANGCI_CONFIG)) ./...
 
 
 ## mod
