@@ -6,8 +6,8 @@ package stackdriver
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"runtime"
 	"time"
 
 	sdlogging "cloud.google.com/go/logging"
@@ -22,6 +22,7 @@ type Encoder struct {
 	zapcore.Encoder
 }
 
+// NewStackdriverEncoder returns the stackdriver zapcore.Encoder.
 func NewStackdriverEncoder(ctx context.Context, projectID, logID string) zapcore.Encoder {
 	client, err := sdlogging.NewClient(ctx, projectID)
 	if err != nil {
@@ -45,7 +46,38 @@ func NewStackdriverEncoder(ctx context.Context, projectID, logID string) zapcore
 	}
 }
 
-// NewStackdriverConfig ...
+var logLevelSeverity = map[zapcore.Level]string{
+	zapcore.DebugLevel:  "DEBUG",
+	zapcore.InfoLevel:   "INFO",
+	zapcore.WarnLevel:   "WARNING",
+	zapcore.ErrorLevel:  "ERROR",
+	zapcore.DPanicLevel: "CRITICAL",
+	zapcore.PanicLevel:  "ALERT",
+	zapcore.FatalLevel:  "EMERGENCY",
+}
+
+func LevelEncoder(l zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
+	enc.AppendString(logLevelSeverity[l])
+}
+
+// NewStackdriverEncoderConfig returns the new zapcore.EncoderConfig with stackdriver encoder config.
+func NewStackdriverEncoderConfig() zapcore.EncoderConfig {
+	return zapcore.EncoderConfig{
+		TimeKey:        "eventTime",
+		LevelKey:       "severity",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		MessageKey:     "message",
+		StacktraceKey:  "trace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    LevelEncoder,
+		EncodeTime:     zapcore.ISO8601TimeEncoder,
+		EncodeDuration: zapcore.SecondsDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+}
+
+// NewStackdriverConfig returns the stackdriver encoder zap.Config.
 func NewStackdriverConfig() zap.Config {
 	return zap.Config{
 		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
@@ -61,43 +93,9 @@ func NewStackdriverConfig() zap.Config {
 	}
 }
 
-func NewStackdriverEncoderConfig() zapcore.EncoderConfig {
-	return zapcore.EncoderConfig{
-		TimeKey:       "eventTime",
-		LevelKey:      "severity",
-		NameKey:       "logger",
-		CallerKey:     "caller",
-		MessageKey:    "message",
-		StacktraceKey: "trace",
-		LineEnding:    zapcore.DefaultLineEnding,
-		EncodeLevel: func(l zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
-			switch l {
-			case zapcore.DebugLevel:
-				enc.AppendString("DEBUG")
-			case zapcore.InfoLevel:
-				enc.AppendString("INFO")
-			case zapcore.WarnLevel:
-				enc.AppendString("WARNING")
-			case zapcore.ErrorLevel:
-				enc.AppendString("ERROR")
-			case zapcore.DPanicLevel:
-				enc.AppendString("CRITICAL")
-			case zapcore.PanicLevel:
-				enc.AppendString("ALERT")
-			case zapcore.FatalLevel:
-				enc.AppendString("EMERGENCY")
-			}
-		},
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.SecondsDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
-	}
-}
-
-func (e *Encoder) Clone() zapcore.Encoder {
-	return &Encoder{
-		lg:      e.lg,
-		Encoder: e.Encoder.Clone(),
+func RegisterStackdriverEncoder(ctx context.Context, projectID, logID string) (string, func(zapcore.EncoderConfig) (zapcore.Encoder, error)) {
+	return "stackdriver", func(zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		return NewStackdriverEncoder(ctx, projectID, logID), nil
 	}
 }
 
@@ -124,6 +122,13 @@ func (Encoder) parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 	return sev
 }
 
+func (e *Encoder) Clone() zapcore.Encoder {
+	return &Encoder{
+		lg:      e.lg,
+		Encoder: e.Encoder.Clone(),
+	}
+}
+
 func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	if ent.Caller.Defined {
 		for _, f := range fields {
@@ -133,12 +138,16 @@ func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffe
 		}
 	}
 
-	if ent.Caller.Defined {
-		fields = append(fields, zap.Object("sourceLocation", reportLocation{
-			File: ent.Caller.File,
-			Line: ent.Caller.Line,
-		}))
-		ent.Caller.Defined = false
+	caller := ent.Caller
+	if caller.Defined {
+		loc := &ReportLocation{
+			FilePath:   ent.Caller.File,
+			LineNumber: ent.Caller.Line,
+		}
+		if fn := runtime.FuncForPC(caller.PC); fn != nil {
+			loc.FunctionName = fn.Name()
+		}
+		fields = append(fields, zap.Object("sourceLocation", loc))
 	}
 
 	if ent.Stack != "" {
@@ -156,61 +165,4 @@ func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffe
 	e.lg.Log(entry)
 
 	return buf, err
-}
-
-type ServiceContext struct {
-	Service string `json:"service"`
-	Version string `json:"version"`
-}
-
-// MarshalLogObject implements zapcore ObjectMarshaler.
-func (sc ServiceContext) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	if sc.Service == "" {
-		return errors.New("service name is mandatory")
-	}
-	enc.AddString("service", sc.Service)
-	enc.AddString("version", sc.Version)
-
-	return nil
-}
-
-// LINK: https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#HttpRequest
-type HTTPRequest struct {
-	Method    string
-	URL       string
-	UserAgent string
-	Referrer  string
-	Status    int
-	RemoteIP  string
-	Latency   time.Duration
-}
-
-// MarshalLogObject implements zapcore ObjectMarshaler.
-func (req HTTPRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("requestMethod", req.Method)
-	enc.AddString("requestUrl", req.URL)
-	enc.AddString("userAgent", req.UserAgent)
-	enc.AddString("referrer", req.Referrer)
-	enc.AddString("remoteIp", req.RemoteIP)
-	enc.AddInt("status", req.Status)
-	enc.AddString("latency", fmt.Sprintf("%gs", req.Latency.Seconds()))
-
-	return nil
-}
-
-type reportLocation struct {
-	File     string
-	Line     int
-	Function string
-}
-
-// MarshalLogObject implements zapcore ObjectMarshaler.
-func (rl reportLocation) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("file", rl.File)
-	enc.AddInt("line", rl.Line)
-	if rl.Function != "" {
-		enc.AddString("function", rl.Function)
-	}
-
-	return nil
 }
