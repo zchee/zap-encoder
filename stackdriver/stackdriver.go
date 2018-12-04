@@ -19,6 +19,7 @@ import (
 
 const (
 	keyServiceContext        = "serviceContext"
+	keyContext               = "context"
 	keyContextHTTPRequest    = "context.httpRequest"
 	keyContextUser           = "context.user"
 	keyContextReportLocation = "context.reportLocation"
@@ -154,44 +155,46 @@ func parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 	case zapcore.FatalLevel:
 		sev = sdlogging.Emergency
 	default:
-		sev = sdlogging.Default
+		sev = sdlogging.Notice
 	}
 
 	return sev
 }
 
+func (e *Encoder) parseEntry(enc zapcore.Encoder, ent zapcore.Entry, cfg *zapcore.EncoderConfig) {
+	if !ent.Time.IsZero() && cfg.TimeKey != "" {
+		enc.AddTime(cfg.TimeKey, ent.Time)
+	}
+	if ent.LoggerName != "" && cfg.NameKey != "" {
+		enc.AddString(cfg.NameKey, ent.LoggerName)
+	}
+	if ent.Caller.Defined && cfg.CallerKey != "" {
+		enc.AddReflected(cfg.CallerKey, ent.Caller)
+	}
+	if ent.Message != "" && cfg.MessageKey != "" {
+		enc.AddString(cfg.MessageKey, ent.Message)
+	}
+	if ent.Stack != "" && cfg.StacktraceKey != "" {
+		enc.AddString(cfg.StacktraceKey, ent.Stack)
+		ent.Message = ent.Message + "\n" + ent.Stack
+		ent.Stack = ""
+	}
+}
+
 func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	enc := e.Encoder.Clone()
-	cfg := e.EncoderConfig
 
+	cfg := e.EncoderConfig
 	if cfg != nil {
-		if !ent.Time.IsZero() && cfg.TimeKey != "" {
-			enc.AddTime(cfg.TimeKey, ent.Time)
-		}
-		if ent.Level > zapcore.Level(-2) && cfg.LevelKey != "" {
-			enc.AddString(cfg.LevelKey, ent.Level.String())
-		}
-		if ent.LoggerName != "" && cfg.NameKey != "" {
-			enc.AddString(cfg.NameKey, ent.LoggerName)
-		}
-		if ent.Caller.Defined && cfg.CallerKey != "" {
-			enc.AddReflected(cfg.CallerKey, ent.Caller)
-		}
-		if ent.Message != "" && cfg.MessageKey != "" {
-			enc.AddString(cfg.MessageKey, ent.Message)
-		}
-		if ent.Stack != "" && cfg.StacktraceKey != "" {
-			enc.AddString(cfg.StacktraceKey, ent.Stack)
-			ent.Message = ent.Message + "\n" + ent.Stack
-			ent.Stack = ""
-		}
+		e.parseEntry(enc, ent, cfg)
 	}
 
 	fields, ctx := e.extractCtx(fields)
 	if ctx != nil {
-		fields = append(fields, zap.Object("context", ctx))
+		fields = append(fields, LogContext(ctx))
 	}
-	rl := e.reportLocationFromEntry(ent)
+
+	rl := e.ReportLocationFromEntry(ent, fields)
 	if rl != nil {
 		fields = append(fields, LogReportLocation(rl))
 	}
@@ -199,8 +202,8 @@ func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffe
 	buf, err := enc.EncodeEntry(ent, fields)
 	entry := sdlogging.Entry{
 		Timestamp: ent.Time,
-		Payload:   buf.String(),
 		Severity:  parseLevel(ent.Level),
+		Payload:   buf.String(),
 	}
 	e.lg.Log(entry)
 
@@ -230,7 +233,7 @@ func (e *Encoder) extractCtx(fields []zapcore.Field) ([]zapcore.Field, *Context)
 	return output, ctx
 }
 
-func (e *Encoder) reportLocationFromEntry(ent zapcore.Entry) *ReportLocation {
+func (e *Encoder) ReportLocationFromEntry(ent zapcore.Entry, fields []zapcore.Field) *ReportLocation {
 	if !e.SetReportLocation {
 		return nil
 	}
@@ -241,16 +244,12 @@ func (e *Encoder) reportLocationFromEntry(ent zapcore.Entry) *ReportLocation {
 	}
 
 	loc := &ReportLocation{
-		File: caller.File,
-		Line: caller.Line,
+		FilePath:   caller.File,
+		LineNumber: caller.Line,
 	}
 	if fn := runtime.FuncForPC(caller.PC); fn != nil {
-		loc.Function = fn.Name()
+		loc.FunctionName = fn.Name()
 	}
 
 	return loc
-}
-
-func LogReportLocation(loc *ReportLocation) zapcore.Field {
-	return zap.Object(keyContextReportLocation, loc)
 }

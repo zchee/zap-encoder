@@ -5,6 +5,7 @@
 package stackdriver
 
 import (
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/errors"
 )
@@ -109,22 +110,38 @@ func (req *HTTPRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 }
 
 type ReportLocation struct {
-	File     string
-	Line     int
-	Function string
+	FilePath     string `json:"filePath"`
+	LineNumber   int    `json:"lineNumber"`
+	FunctionName string `json:"functionName"`
 }
 
 func (r *ReportLocation) Clone() *ReportLocation {
 	return &ReportLocation{
-		File:     r.File,
-		Line:     r.Line,
-		Function: r.Function,
+		FilePath:     r.FilePath,
+		LineNumber:   r.LineNumber,
+		FunctionName: r.FunctionName,
 	}
 }
 
 func (r *ReportLocation) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("filePath", r.File)
-	enc.AddInt("lineNumber", r.Line)
-	enc.AddString("functionName", r.Function)
+	enc.AddString("filePath", r.FilePath)
+	enc.AddInt("lineNumber", r.LineNumber)
+	enc.AddString("functionName", r.FunctionName)
 	return nil
+}
+
+func LogContext(ctx *Context) zapcore.Field {
+	return zap.Object(keyContext, ctx)
+}
+
+func LogServiceContext(sc *ServiceContext) zapcore.Field {
+	return zap.Object(keyServiceContext, sc)
+}
+
+func LogUser(user string) zapcore.Field {
+	return zap.String(keyContextUser, user)
+}
+
+func LogReportLocation(loc *ReportLocation) zapcore.Field {
+	return zap.Object(keyContextReportLocation, loc)
 }
