@@ -169,43 +169,7 @@ mod/clean:
 	@$(RM) -r vendor
 
 mod: mod/clean mod/init mod/tidy mod/vendor  ## Updates the vendoring directory via go mod.
-
-
-## dep
-
-$(GO_PATH)/bin/dep:
-	@go get -u github.com/golang/dep/cmd/dep
-
-cmd/dep: $(GO_PATH)/bin/dep
-
-.PHONY: dep/init
-dep/init: cmd/dep  ## Fetch vendor packages via dep ensure.
-	$(call target)
-	@dep init -v -no-examples
-
-.PHONY: dep/ensure
-dep/ensure: cmd/dep Gopkg.toml  ## Fetch vendor packages via dep ensure.
-	$(call target)
-	@dep ensure -v
-
-.PHONY: dep/ensure/only-vendor
-dep/ensure/only-vendor: cmd/dep Gopkg.toml Gopkg.lock  ## Fetch vendor packages via dep ensure.
-	$(call target)
-	@dep ensure -v -vendor-only
-
-.PHONY: dep/clean
-dep/clean: cmd/dep
-	$(call target)
-	@$(RM) Gopkg.toml Gopkg.lock
-	@$(RM) -r vendor
-
-.PHONY: dep/update
-dep/update: cmd/dep dep/clean
-	$(call target)
-	@dep ensure -v -update
-
-.PHONY: dep/init
-dep: dep/clean dep/update  ## Updates the vendoring directory via dep.
+	@sed -i ':a;N;$$!ba;s|go 1\.12\n\n||g' go.mod
 
 
 ## miscellaneous
