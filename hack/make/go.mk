@@ -12,7 +12,12 @@ GO_TEST_PKGS := $(shell go list -f='{{if or .TestGoFiles .XTestGoFiles}}{{.Impor
 CGO_ENABLED := 1
 GO_LDFLAGS=-ldflags "-w $(CTIMEVAR)"
 GO_LDFLAGS_STATIC=-ldflags "-w $(CTIMEVAR) -extldflags -static"
-GO_BUILDTAGS := osusergo
+GO_BUILDTAGS=osusergo
+GOFLAGS ?= -tags '$(GO_BUILDTAGS)'
+
+ifeq ($(CI),)  # $CI is empty
+	GOFLAGS+=-mod=vendor
+endif
 
 GO_TEST ?= go test
 GO_TEST_FUNC ?= .
@@ -44,45 +49,45 @@ endef
 .PHONY: test
 test:  ## Run the package test with checks race condition.
 	$(call target)
-	$(GO_TEST) -v -race -tags "$(GO_BUILDTAGS)" -run=$(GO_TEST_FUNC) $(GO_TEST_FLAGS) $(GO_TEST_PKGS)
+	$(GO_TEST) -v -race $(strip $(GOFLAGS)) -run=$(GO_TEST_FUNC) $(GO_TEST_PKGS)
 
 .PHONY: test/cpu
-test/cpu: GO_TEST_FLAGS+=-cpuprofile cpu.out
+test/cpu: GOFLAGS+=-cpuprofile cpu.out
 test/cpu: test  ## Run the package test with take a cpu profiling.
 	$(call target)
 
 .PHONY: test/mem
-test/mem: GO_TEST_FLAGS+=-memprofile mem.out
+test/mem: GOFLAGS+=-memprofile mem.out
 test/mem: test  ## Run the package test with take a memory profiling.
 	$(call target)
 
 .PHONY: test/mutex
-test/mutex: GO_TEST_FLAGS+=-mutexprofile mutex.out
+test/mutex: GOFLAGS+=-mutexprofile mutex.out
 test/mutex: test  ## Run the package test with take a mutex profiling.
 	$(call target)
 
 .PHONY: test/block
-test/block: GO_TEST_FLAGS+=-blockprofile block.out
+test/block: GOFLAGS+=-blockprofile block.out
 test/block: test  ## Run the package test with take a blockingh profiling.
 	$(call target)
 
 .PHONY: test/trace
-test/trace: GO_TEST_FLAGS+=-trace trace.out
+test/trace: GOFLAGS+=-trace trace.out
 test/trace: test  ## Run the package test with take a trace profiling.
 	$(call target)
 
 .PHONY: bench
 bench:  ## Take a package benchmark.
 	$(call target)
-	$(GO_TEST) -v -tags "$(GO_BUILDTAGS)" -run='^$$' -bench=$(GO_BENCH_FUNC) $(GO_BENCH_FLAGS) $(GO_TEST_PKGS)
+	$(GO_TEST) -v $(strip $(GOFLAGS)) -run='^$$' -bench=$(GO_BENCH_FUNC) -benchmem $(GO_TEST_PKGS)
 
 .PHONY: bench/race
 bench/race:  ## Take a package benchmark with checks race condition.
 	$(call target)
-	$(GO_TEST) -v -race -tags "$(GO_BUILDTAGS)" -run='^$$' -bench=$(GO_BENCH_FUNC) $(GO_BENCH_FLAGS) $(GO_TEST_PKGS)
+	$(GO_TEST) -v -race $(strip $(GOFLAGS)) -run='^$$' -bench=$(GO_BENCH_FUNC) -benchmem $(GO_TEST_PKGS)
 
 .PHONY: bench/cpu
-bench/cpu: GO_BENCH_FLAGS+=-cpuprofile cpu.out
+bench/cpu: GOFLAGS+=-cpuprofile cpu.out
 bench/cpu: bench  ## Take a package benchmark with take a cpu profiling.
 
 .PHONY: bench/trace
@@ -93,7 +98,7 @@ bench/trace:  ## Take a package benchmark with take a trace profiling.
 .PHONY: coverage
 coverage:  ## Take test coverage.
 	$(call target)
-	$(GO_TEST) -v -tags "$(GO_BUILDTAGS)" -covermode=atomic -coverpkg=$(PKG)/... -coverprofile=coverage.out $(GO_TEST_PKGS)
+	$(GO_TEST) -v -race $(strip $(GOFLAGS)) -covermode=atomic -coverpkg=$(PKG)/... -coverprofile=coverage.out $(GO_TEST_PKGS)
 
 $(GO_PATH)/bin/go-junit-report:
 	@GO111MODULE=off go get -u github.com/jstemmer/go-junit-report
@@ -103,9 +108,8 @@ cmd/go-junit-report: $(GO_PATH)/bin/go-junit-report  # go get 'go-junit-report' 
 .PHONY: coverage/junit
 coverage/junit: cmd/go-junit-report  ## Take test coverage and output test results with junit syntax.
 	$(call target)
-	@echo $(GO_TEST_PKGS)
 	mkdir -p _test-results
-	$(GO_TEST) -v -tags "$(GO_BUILDTAGS)" -covermode=atomic -coverpkg=$(PKG)/... -coverprofile=coverage.out $(GO_TEST_PKGS) 2>&1 | go-junit-report > _test-results/results.xml
+	$(GO_TEST) -v -race $(strip $(GOFLAGS)) -covermode=atomic -coverpkg=$(PKG)/... -coverprofile=coverage.out $(GO_TEST_PKGS) 2>&1 | tee /dev/stderr | go-junit-report -set-exit-code > _test-results/report.xml
 
 
 ## lint
@@ -133,7 +137,7 @@ cmd/golint: $(GO_PATH)/bin/golint  # go get 'golint' binary
 .PHONY: lint/golint
 lint/golint: cmd/golint  ## Verifies `golint` passes.
 	$(call target)
-	@golint -min_confidence=0.3 -set_exit_status $(GO_PKGS)
+	@golint -min_confidence=0.3 $(GO_PKGS)
 
 $(GO_PATH)/bin/golangci-lint:
 	@GO111MODULE=off go get -u github.com/golangci/golangci-lint/cmd/golangci-lint
