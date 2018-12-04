@@ -30,10 +30,11 @@ type Encoder struct {
 	ctx               *Context
 
 	zapcore.Encoder
+	*zapcore.EncoderConfig
 }
 
 // NewStackdriverEncoder returns the stackdriver zapcore.Encoder.
-func NewStackdriverEncoder(ctx context.Context, projectID, logID string) zapcore.Encoder {
+func NewStackdriverEncoder(ctx context.Context, encoderConfig zapcore.EncoderConfig, projectID, logID string) zapcore.Encoder {
 	client, err := sdlogging.NewClient(ctx, projectID)
 	if err != nil {
 		panic(fmt.Errorf("failed to create logging client: %+v", err))
@@ -51,8 +52,9 @@ func NewStackdriverEncoder(ctx context.Context, projectID, logID string) zapcore
 	}
 
 	return &Encoder{
-		lg:      client.Logger(logID, sdlogging.ContextFunc(ctxFn)),
-		Encoder: zapcore.NewJSONEncoder(NewStackdriverEncoderConfig()),
+		lg:            client.Logger(logID, sdlogging.ContextFunc(ctxFn)),
+		Encoder:       zapcore.NewJSONEncoder(encoderConfig),
+		EncoderConfig: &encoderConfig,
 	}
 }
 
@@ -104,9 +106,17 @@ func NewStackdriverConfig() zap.Config {
 }
 
 func RegisterStackdriverEncoder(ctx context.Context, projectID, logID string) (string, func(zapcore.EncoderConfig) (zapcore.Encoder, error)) {
-	return "stackdriver", func(zapcore.EncoderConfig) (zapcore.Encoder, error) {
-		return NewStackdriverEncoder(ctx, projectID, logID), nil
+	return "stackdriver", func(encoderConfig zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		return NewStackdriverEncoder(ctx, encoderConfig, projectID, logID), nil
 	}
+}
+
+func (e *Encoder) encoder() zapcore.Encoder {
+	return e.Encoder.(zapcore.Encoder)
+}
+
+func (e *Encoder) primitiveArrayEncoder() zapcore.PrimitiveArrayEncoder {
+	return e.Encoder.(zapcore.PrimitiveArrayEncoder)
 }
 
 func (e *Encoder) Clone() zapcore.Encoder {
@@ -114,7 +124,7 @@ func (e *Encoder) Clone() zapcore.Encoder {
 		lg:                e.lg,
 		SetReportLocation: e.SetReportLocation,
 		ctx:               e.ctx,
-		Encoder:           e.Encoder.Clone(),
+		Encoder:           e.encoder().Clone(),
 	}
 }
 
@@ -150,26 +160,39 @@ func parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 }
 
 func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	fields, ctx := e.extractCtx(fields)
-	fields = append(fields, zap.Object("context", ctx))
+	enc := e.Encoder.Clone()
 
-	rl := e.reportLocationFromEntry(ent)
-	fields = append(fields, LogReportLocation(rl))
-
-	if ent.Caller.Defined {
-		for _, f := range fields {
-			if f.Key == "error" && f.Type == zapcore.ErrorType {
-				ent.Message = ent.Message + "\ndue to error: " + f.Interface.(error).Error()
-			}
-		}
+	if !ent.Time.IsZero() && e.EncoderConfig.TimeKey != "" {
+		enc.AddTime(e.EncoderConfig.TimeKey, ent.Time)
 	}
-	if ent.Stack != "" {
+	if ent.Level > zapcore.Level(-2) && e.EncoderConfig.LevelKey != "" {
+		enc.AddString(e.EncoderConfig.LevelKey, ent.Level.String())
+	}
+	if ent.LoggerName != "" && e.EncoderConfig.NameKey != "" {
+		enc.AddString(e.EncoderConfig.NameKey, ent.LoggerName)
+	}
+	if ent.Caller.Defined && e.EncoderConfig.CallerKey != "" {
+		enc.AddReflected(e.EncoderConfig.CallerKey, ent.Caller)
+	}
+	if ent.Message != "" && e.EncoderConfig.MessageKey != "" {
+		enc.AddString(e.EncoderConfig.MessageKey, ent.Message)
+	}
+	if ent.Stack != "" && e.EncoderConfig.StacktraceKey != "" {
+		enc.AddString(e.EncoderConfig.StacktraceKey, ent.Stack)
 		ent.Message = ent.Message + "\n" + ent.Stack
 		ent.Stack = ""
 	}
 
-	buf, err := e.Encoder.EncodeEntry(ent, fields)
+	fields, ctx := e.extractCtx(fields)
+	if ctx != nil {
+		fields = append(fields, zap.Object("context", ctx))
+	}
+	rl := e.reportLocationFromEntry(ent)
+	if rl != nil {
+		fields = append(fields, LogReportLocation(rl))
+	}
 
+	buf, err := enc.EncodeEntry(ent, fields)
 	entry := sdlogging.Entry{
 		Timestamp: ent.Time,
 		Payload:   buf.String(),
@@ -183,6 +206,9 @@ func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffe
 func (e *Encoder) extractCtx(fields []zapcore.Field) ([]zapcore.Field, *Context) {
 	output := []zapcore.Field{}
 	ctx := e.cloneCtx()
+	if ctx.IsEmpty() {
+		return fields, nil
+	}
 
 	for _, f := range fields {
 		switch f.Key {

@@ -38,6 +38,10 @@ type Context struct {
 	ReportLocation *ReportLocation `json:"reportLocation"`
 }
 
+func (c *Context) IsEmpty() bool {
+	return c.User == "" && c.HTTPRequest == nil && c.ReportLocation == nil
+}
+
 func (c *Context) Clone() *Context {
 	output := &Context{
 		User: c.User,
