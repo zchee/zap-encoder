@@ -124,7 +124,7 @@ func (e *Encoder) Clone() zapcore.Encoder {
 		lg:                e.lg,
 		SetReportLocation: e.SetReportLocation,
 		ctx:               e.ctx,
-		Encoder:           e.encoder().Clone(),
+		Encoder:           e.Encoder.Clone(),
 		EncoderConfig:     e.EncoderConfig,
 	}
 }
