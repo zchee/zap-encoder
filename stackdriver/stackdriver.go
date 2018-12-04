@@ -106,8 +106,8 @@ func NewStackdriverConfig() zap.Config {
 }
 
 func RegisterStackdriverEncoder(ctx context.Context, projectID, logID string) (string, func(zapcore.EncoderConfig) (zapcore.Encoder, error)) {
-	return "stackdriver", func(encoderConfig zapcore.EncoderConfig) (zapcore.Encoder, error) {
-		return NewStackdriverEncoder(ctx, encoderConfig, projectID, logID), nil
+	return "stackdriver", func(zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		return NewStackdriverEncoder(ctx, NewStackdriverEncoderConfig(), projectID, logID), nil
 	}
 }
 
