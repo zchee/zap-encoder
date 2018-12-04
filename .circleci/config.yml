@@ -39,6 +39,13 @@ jobs:
             make mod/vendor
       - save_gomod_cache
       - run:
+          name: Add $GOOGLE_APPLICATION_CREDENTIALS
+          shell: /bin/bash
+          command: |
+            mkdir -p /root/.config/gcloud
+            touch $GOOGLE_APPLICATION_CREDENTIALS
+            echo $GOOGLE_APPLICATION_CREDENTIALS_JSON | base64 -d > $GOOGLE_APPLICATION_CREDENTIALS
+      - run:
           name: Test and collect coverages
           command: |
             make coverage/junit
