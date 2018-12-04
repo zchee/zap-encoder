@@ -125,6 +125,7 @@ func (e *Encoder) Clone() zapcore.Encoder {
 		SetReportLocation: e.SetReportLocation,
 		ctx:               e.ctx,
 		Encoder:           e.encoder().Clone(),
+		EncoderConfig:     e.EncoderConfig,
 	}
 }
 
@@ -161,26 +162,29 @@ func parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 
 func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	enc := e.Encoder.Clone()
+	cfg := e.EncoderConfig
 
-	if !ent.Time.IsZero() && e.EncoderConfig.TimeKey != "" {
-		enc.AddTime(e.EncoderConfig.TimeKey, ent.Time)
-	}
-	if ent.Level > zapcore.Level(-2) && e.EncoderConfig.LevelKey != "" {
-		enc.AddString(e.EncoderConfig.LevelKey, ent.Level.String())
-	}
-	if ent.LoggerName != "" && e.EncoderConfig.NameKey != "" {
-		enc.AddString(e.EncoderConfig.NameKey, ent.LoggerName)
-	}
-	if ent.Caller.Defined && e.EncoderConfig.CallerKey != "" {
-		enc.AddReflected(e.EncoderConfig.CallerKey, ent.Caller)
-	}
-	if ent.Message != "" && e.EncoderConfig.MessageKey != "" {
-		enc.AddString(e.EncoderConfig.MessageKey, ent.Message)
-	}
-	if ent.Stack != "" && e.EncoderConfig.StacktraceKey != "" {
-		enc.AddString(e.EncoderConfig.StacktraceKey, ent.Stack)
-		ent.Message = ent.Message + "\n" + ent.Stack
-		ent.Stack = ""
+	if cfg != nil {
+		if !ent.Time.IsZero() && cfg.TimeKey != "" {
+			enc.AddTime(cfg.TimeKey, ent.Time)
+		}
+		if ent.Level > zapcore.Level(-2) && cfg.LevelKey != "" {
+			enc.AddString(cfg.LevelKey, ent.Level.String())
+		}
+		if ent.LoggerName != "" && cfg.NameKey != "" {
+			enc.AddString(cfg.NameKey, ent.LoggerName)
+		}
+		if ent.Caller.Defined && cfg.CallerKey != "" {
+			enc.AddReflected(cfg.CallerKey, ent.Caller)
+		}
+		if ent.Message != "" && cfg.MessageKey != "" {
+			enc.AddString(cfg.MessageKey, ent.Message)
+		}
+		if ent.Stack != "" && cfg.StacktraceKey != "" {
+			enc.AddString(cfg.StacktraceKey, ent.Stack)
+			ent.Message = ent.Message + "\n" + ent.Stack
+			ent.Stack = ""
+		}
 	}
 
 	fields, ctx := e.extractCtx(fields)
