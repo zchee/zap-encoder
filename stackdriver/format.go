@@ -105,22 +105,22 @@ func (req *HTTPRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 }
 
 type ReportLocation struct {
-	FilePath     string
-	LineNumber   int
-	FunctionName string
+	File     string
+	Line     int
+	Function string
 }
 
 func (r *ReportLocation) Clone() *ReportLocation {
 	return &ReportLocation{
-		FilePath:     r.FilePath,
-		LineNumber:   r.LineNumber,
-		FunctionName: r.FunctionName,
+		File:     r.File,
+		Line:     r.Line,
+		Function: r.Function,
 	}
 }
 
 func (r *ReportLocation) MarshalLogObject(enc zapcore.ObjectEncoder) error {
-	enc.AddString("filePath", r.FilePath)
-	enc.AddInt("lineNumber", r.LineNumber)
-	enc.AddString("functionName", r.FunctionName)
+	enc.AddString("filePath", r.File)
+	enc.AddInt("lineNumber", r.Line)
+	enc.AddString("functionName", r.Function)
 	return nil
 }

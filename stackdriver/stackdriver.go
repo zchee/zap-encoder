@@ -17,8 +17,18 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+const (
+	keyServiceContext        = "serviceContext"
+	keyContextHTTPRequest    = "context.httpRequest"
+	keyContextUser           = "context.user"
+	keyContextReportLocation = "context.reportLocation"
+)
+
 type Encoder struct {
-	lg *sdlogging.Logger
+	lg                *sdlogging.Logger
+	SetReportLocation bool
+	ctx               *Context
+
 	zapcore.Encoder
 }
 
@@ -99,7 +109,24 @@ func RegisterStackdriverEncoder(ctx context.Context, projectID, logID string) (s
 	}
 }
 
-func (Encoder) parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
+func (e *Encoder) Clone() zapcore.Encoder {
+	return &Encoder{
+		lg:                e.lg,
+		SetReportLocation: e.SetReportLocation,
+		ctx:               e.ctx,
+		Encoder:           e.Encoder.Clone(),
+	}
+}
+
+func (e *Encoder) cloneCtx() *Context {
+	if e.ctx == nil {
+		return &Context{}
+	}
+
+	return e.ctx.Clone()
+}
+
+func parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 	switch l {
 	case zapcore.DebugLevel:
 		sev = sdlogging.Debug
@@ -122,14 +149,13 @@ func (Encoder) parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 	return sev
 }
 
-func (e *Encoder) Clone() zapcore.Encoder {
-	return &Encoder{
-		lg:      e.lg,
-		Encoder: e.Encoder.Clone(),
-	}
-}
-
 func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
+	fields, ctx := e.extractCtx(fields)
+	fields = append(fields, zap.Object("context", ctx))
+
+	rl := e.reportLocationFromEntry(ent)
+	fields = append(fields, LogReportLocation(rl))
+
 	if ent.Caller.Defined {
 		for _, f := range fields {
 			if f.Key == "error" && f.Type == zapcore.ErrorType {
@@ -137,19 +163,6 @@ func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffe
 			}
 		}
 	}
-
-	caller := ent.Caller
-	if caller.Defined {
-		loc := &ReportLocation{
-			FilePath:   ent.Caller.File,
-			LineNumber: ent.Caller.Line,
-		}
-		if fn := runtime.FuncForPC(caller.PC); fn != nil {
-			loc.FunctionName = fn.Name()
-		}
-		fields = append(fields, zap.Object("sourceLocation", loc))
-	}
-
 	if ent.Stack != "" {
 		ent.Message = ent.Message + "\n" + ent.Stack
 		ent.Stack = ""
@@ -160,9 +173,54 @@ func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffe
 	entry := sdlogging.Entry{
 		Timestamp: ent.Time,
 		Payload:   buf.String(),
-		Severity:  e.parseLevel(ent.Level),
+		Severity:  parseLevel(ent.Level),
 	}
 	e.lg.Log(entry)
 
 	return buf, err
+}
+
+func (e *Encoder) extractCtx(fields []zapcore.Field) ([]zapcore.Field, *Context) {
+	output := []zapcore.Field{}
+	ctx := e.cloneCtx()
+
+	for _, f := range fields {
+		switch f.Key {
+		case keyContextHTTPRequest:
+			ctx.HTTPRequest = f.Interface.(*HTTPRequest)
+		case keyContextReportLocation:
+			ctx.ReportLocation = f.Interface.(*ReportLocation)
+		case keyContextUser:
+			ctx.User = f.String
+		default:
+			output = append(output, f)
+		}
+	}
+
+	return output, ctx
+}
+
+func (e *Encoder) reportLocationFromEntry(ent zapcore.Entry) *ReportLocation {
+	if !e.SetReportLocation {
+		return nil
+	}
+
+	caller := ent.Caller
+	if !caller.Defined {
+		return nil
+	}
+
+	loc := &ReportLocation{
+		File: caller.File,
+		Line: caller.Line,
+	}
+	if fn := runtime.FuncForPC(caller.PC); fn != nil {
+		loc.Function = fn.Name()
+	}
+
+	return loc
+}
+
+func LogReportLocation(loc *ReportLocation) zapcore.Field {
+	return zap.Object(keyContextReportLocation, loc)
 }
