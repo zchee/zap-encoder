@@ -63,7 +63,7 @@ jobs:
       - run:
           name: Run lint for sources
           command: |
-            make -j$(nproc) lint/ci
+            make lint/ci
 
 workflows:
   version: 2
