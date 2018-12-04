@@ -15,20 +15,21 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/zchee/zap-encoder/internal/testutil"
+	"github.com/zchee/zap-encoder/internal/uid"
 	"github.com/zchee/zap-encoder/stackdriver"
 )
 
 const (
-	testProjectID = "testProjectID"
-	testLogID     = "testLogID"
+	testLogIDPrefix = "GO-LOGGING-CLIENT/TEST-LOG"
 )
 
-// TestJSONEncodeEntry is an more "integrated" test that makes it easier to get
-// coverage on the json encoder (e.g. putJSONEncoder, let alone EncodeEntry
-// itself) than the tests in json_encoder_impl_test.go; it needs to be in the
-// zapcore_test package, so that it can import the toplevel zap package for
-// field constructor convenience.
 func TestStackdriverEncodeEntry(t *testing.T) {
+	ctx := context.Background()
+	testProjectID := testutil.ProjectID()
+	uids := uid.NewSpace(testLogIDPrefix, nil)
+	testLogID := uids.New()
+
 	type bar struct {
 		Key string  `json:"key"`
 		Val float64 `json:"val"`
@@ -95,13 +96,13 @@ func TestStackdriverEncodeEntry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := stackdriver.NewStackdriverEncoderConfig()
-			enc := stackdriver.NewStackdriverEncoder(context.Background(), cfg, testProjectID, testLogID)
+			enc := stackdriver.NewStackdriverEncoder(ctx, stackdriver.NewStackdriverEncoderConfig(), testProjectID, testLogID)
 			buf, err := enc.EncodeEntry(tt.ent, tt.fields)
 			if err != nil {
 				t.Errorf("Unexpected JSON encoding error: %+v", err)
 				return
 			}
+			defer buf.Free()
 
 			var expectedJSONAsInterface, actualJSONAsInterface interface{}
 			if err := json.Unmarshal([]byte(tt.expected), &expectedJSONAsInterface); err != nil {
@@ -116,10 +117,6 @@ func TestStackdriverEncodeEntry(t *testing.T) {
 			if diff := cmp.Diff(&expectedJSONAsInterface, &actualJSONAsInterface); diff != "" {
 				t.Errorf("%s: Incorrect encoded JSON entry: (-got, +want)\n%s\n", tt.name, diff)
 			}
-			// if !cmp.Equal(expectedJSONAsInterface, actualJSONAsInterface) {
-			// 	t.Error("Incorrect encoded JSON entry")
-			// }
-			// buf.Free()
 		})
 	}
 }

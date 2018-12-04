@@ -10,11 +10,18 @@ import (
 
 	"go.uber.org/zap/zapcore"
 
+	"github.com/zchee/zap-encoder/internal/testutil"
+	"github.com/zchee/zap-encoder/internal/uid"
 	"github.com/zchee/zap-encoder/stackdriver"
 )
 
 func BenchmarkStackdriverEncoderLogMarshalerFunc(b *testing.B) {
-	enc := stackdriver.NewStackdriverEncoder(context.Background(), stackdriver.NewStackdriverEncoderConfig(), testProjectID, testLogID)
+	ctx := context.Background()
+	testProjectID := testutil.ProjectID()
+	uids := uid.NewSpace(testLogIDPrefix, nil)
+	testLogID := uids.New()
+
+	enc := stackdriver.NewStackdriverEncoder(ctx, stackdriver.NewStackdriverEncoderConfig(), testProjectID, testLogID)
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
