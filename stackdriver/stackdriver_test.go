@@ -52,7 +52,7 @@ func TestStackdriverEncodeEntry(t *testing.T) {
 			name: "info entry with some fields",
 			expected: `{
 				"eventTime": "2018-06-19T16:33:42.000Z",
-				"severity": "info",
+				"severity": "INFO",
 				"logger": "bob",
 				"message": "lob law",
 				"so": "passes",
