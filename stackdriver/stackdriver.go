@@ -177,8 +177,6 @@ func (e *Encoder) parseEntry(enc zapcore.Encoder, ent zapcore.Entry, cfg *zapcor
 		}
 		if ent.Stack != "" && cfg.StacktraceKey != "" {
 			enc.AddString(cfg.StacktraceKey, ent.Stack)
-			ent.Message = ent.Message + "\n" + ent.Stack
-			ent.Stack = ""
 		}
 	}
 }
