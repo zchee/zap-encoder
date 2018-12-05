@@ -1,7 +1,7 @@
 module github.com/zchee/zap-encoder
 
 require (
-	cloud.google.com/go v0.33.1
+	cloud.google.com/go v0.34.0
 	contrib.go.opencensus.io/exporter/stackdriver v0.8.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/go-cmp v0.2.0
