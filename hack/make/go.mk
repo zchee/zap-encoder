@@ -153,17 +153,25 @@ lint/golangci-lint: cmd/golangci-lint  ## Run golangci-lint.
 
 ## mod
 
+.PHONY: mod/init
 mod/init:
 	$(call target,mod/init)
 	@GO111MODULE=on go mod init
 
+.PHONY: mod/tidy
 mod/tidy:
 	$(call target)
 	@GO111MODULE=on go mod tidy -v
 
+.PHONY: mod/vendor
 mod/vendor: go.mod go.sum
 	$(call target)
 	@GO111MODULE=on go mod vendor -v
+
+.PHONY: mod/graph
+mod/graph:
+	$(call target)
+	@GO111MODULE=on go mod graph
 
 .PHONY: mod/clean
 mod/clean:
@@ -171,6 +179,7 @@ mod/clean:
 	@$(RM) go.mod go.sum
 	@$(RM) -r vendor
 
+.PHONY: mod
 mod: mod/clean mod/init mod/tidy mod/vendor  ## Updates the vendoring directory via go mod.
 	@sed -i ':a;N;$$!ba;s|go 1\.12\n\n||g' go.mod
 
