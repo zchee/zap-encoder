@@ -10,12 +10,12 @@ coverage:
     project:
       default:
         target: auto
-        threshold: 5%
+        threshold: 10%
     patch:
       default:
         only_pulls: true
         target: 50%
-        threshold: 5%
+        threshold: 10%
   ignore:
     - "vendor/*"
 
