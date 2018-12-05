@@ -109,6 +109,13 @@ func (req *HTTPRequest) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
+// LogHTTPPayload adds the correct Stackdriver "HttpRequest" field.
+//
+// ref: https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#HttpRequest
+func LogHTTPRequest(req *HTTPRequest) zap.Field {
+	return zap.Object(keyContextHTTPRequest, req)
+}
+
 type ReportLocation struct {
 	FilePath     string `json:"filePath"`
 	LineNumber   int    `json:"lineNumber"`

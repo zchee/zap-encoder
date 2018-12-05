@@ -162,32 +162,31 @@ func parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 }
 
 func (e *Encoder) parseEntry(enc zapcore.Encoder, ent zapcore.Entry, cfg *zapcore.EncoderConfig) {
-	if !ent.Time.IsZero() && cfg.TimeKey != "" {
-		enc.AddTime(cfg.TimeKey, ent.Time)
-	}
-	if ent.LoggerName != "" && cfg.NameKey != "" {
-		enc.AddString(cfg.NameKey, ent.LoggerName)
-	}
-	if ent.Caller.Defined && cfg.CallerKey != "" {
-		enc.AddReflected(cfg.CallerKey, ent.Caller)
-	}
-	if ent.Message != "" && cfg.MessageKey != "" {
-		enc.AddString(cfg.MessageKey, ent.Message)
-	}
-	if ent.Stack != "" && cfg.StacktraceKey != "" {
-		enc.AddString(cfg.StacktraceKey, ent.Stack)
-		ent.Message = ent.Message + "\n" + ent.Stack
-		ent.Stack = ""
+	if cfg != nil {
+		if !ent.Time.IsZero() && cfg.TimeKey != "" {
+			enc.AddTime(cfg.TimeKey, ent.Time)
+		}
+		if ent.LoggerName != "" && cfg.NameKey != "" {
+			enc.AddString(cfg.NameKey, ent.LoggerName)
+		}
+		if ent.Caller.Defined && cfg.CallerKey != "" {
+			enc.AddReflected(cfg.CallerKey, ent.Caller)
+		}
+		if ent.Message != "" && cfg.MessageKey != "" {
+			enc.AddString(cfg.MessageKey, ent.Message)
+		}
+		if ent.Stack != "" && cfg.StacktraceKey != "" {
+			enc.AddString(cfg.StacktraceKey, ent.Stack)
+			ent.Message = ent.Message + "\n" + ent.Stack
+			ent.Stack = ""
+		}
 	}
 }
 
 func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	enc := e.Encoder.Clone()
 
-	cfg := e.EncoderConfig
-	if cfg != nil {
-		e.parseEntry(enc, ent, cfg)
-	}
+	e.parseEntry(enc, ent, e.EncoderConfig)
 
 	fields, ctx := e.extractCtx(fields)
 	if ctx != nil {
@@ -221,10 +220,13 @@ func (e *Encoder) extractCtx(fields []zapcore.Field) ([]zapcore.Field, *Context)
 		switch f.Key {
 		case keyContextHTTPRequest:
 			ctx.HTTPRequest = f.Interface.(*HTTPRequest)
+			output = append(output, LogHTTPRequest(ctx.HTTPRequest))
 		case keyContextReportLocation:
 			ctx.ReportLocation = f.Interface.(*ReportLocation)
+			output = append(output, LogReportLocation(ctx.ReportLocation))
 		case keyContextUser:
 			ctx.User = f.String
+			output = append(output, LogUser(ctx.User))
 		default:
 			output = append(output, f)
 		}
