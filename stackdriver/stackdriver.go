@@ -155,7 +155,7 @@ func parseLevel(l zapcore.Level) (sev sdlogging.Severity) {
 	case zapcore.FatalLevel:
 		sev = sdlogging.Emergency
 	default:
-		sev = sdlogging.Notice
+		sev = sdlogging.Default
 	}
 
 	return sev
