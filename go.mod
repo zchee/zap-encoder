@@ -11,9 +11,9 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/testify v1.2.2 // indirect
 	go.opencensus.io v0.18.0
-	go.uber.org/atomic v1.3.2
-	go.uber.org/multierr v1.1.0
-	go.uber.org/zap v1.9.1
+	go.uber.org/atomic v1.3.3-0.20181018215023-8dc6146f7569 // indirect
+	go.uber.org/multierr v1.1.1-0.20180122172545-ddea229ff1df // indirect
+	go.uber.org/zap v1.9.2-0.20180814183419-67bc79d13d15
 	golang.org/x/exp/errors v0.0.0-20181204230839-d319078994eb
 	golang.org/x/oauth2 v0.0.0-20181203162652-d668ce993890
 	google.golang.org/appengine v1.3.0 // indirect
