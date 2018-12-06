@@ -218,15 +218,12 @@ func (e *Encoder) extractCtx(fields []zapcore.Field) ([]zapcore.Field, *Context)
 		switch f.Key {
 		case keyContextHTTPRequest:
 			ctx.HTTPRequest = f.Interface.(*HTTPRequest)
-			// output = append(output, LogHTTPRequest(ctx.HTTPRequest))
 		case keyContextReportLocation:
 			ctx.ReportLocation = f.Interface.(*ReportLocation)
-			// output = append(output, LogReportLocation(ctx.ReportLocation))
 		case keyContextUser:
 			ctx.User = f.String
-			// output = append(output, LogUser(ctx.User))
 		default:
-			output = append(output, f)
+			// output = append(output, f)
 		}
 	}
 
