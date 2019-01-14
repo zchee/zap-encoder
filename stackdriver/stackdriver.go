@@ -7,6 +7,7 @@ package stackdriver
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
@@ -15,30 +16,53 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/zapcore"
+	oauth2_google "golang.org/x/oauth2/google"
 )
 
 func init() {
-	if err := zap.RegisterEncoder("stackdriver", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
-		return &Encoder{
-			Encoder: zapcore.NewJSONEncoder(cfg),
-		}, nil
+	ctx := context.Background()
+	lg := NewDefaultStackdriverClient(ctx, "", "")
+	if err := zap.RegisterEncoder("stackdriver", func(zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		return NewStackdriverEncoder(ctx, lg, NewStackdriverEncoderConfig()), nil
 	}); err != nil {
 		panic(err)
 	}
 }
+
+const defaultLogID = "app_logs"
 
 // Encoder represents a zap.Encoder with stackdriver logging.
 type Encoder struct {
 	lg                *sdlogging.Logger
 	SetReportLocation bool
 	ctx               *LogContext
+	pool              buffer.Pool
 
 	zapcore.Encoder
 	*zapcore.EncoderConfig
 }
 
+func RegisterStackdriverEncoder(ctx context.Context, projectID, logID string) (string, func(zapcore.EncoderConfig) (zapcore.Encoder, error)) {
+	return "stackdriver", func(zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		lg := NewDefaultStackdriverClient(ctx, projectID, logID)
+		return NewStackdriverEncoder(ctx, lg, NewStackdriverEncoderConfig()), nil
+	}
+}
+
 // NewDefaultStackdriverClient returns the stackdriver logging client with default options.
 func NewDefaultStackdriverClient(ctx context.Context, projectID, logID string) *sdlogging.Logger {
+	if projectID == "" {
+		cred, err := oauth2_google.FindDefaultCredentials(ctx)
+		if err != nil {
+			panic(fmt.Errorf("failed to find default credentials: %+v", err))
+		}
+		projectID = cred.ProjectID
+	}
+	if logID == "" {
+		logID = defaultLogID
+	}
+	fmt.Fprintf(os.Stdout, "projectID: %s, logID: %s\n", projectID, logID)
+
 	sd, err := sdlogging.NewClient(ctx, projectID)
 	if err != nil {
 		panic(fmt.Errorf("failed to create logging client: %+v", err))
@@ -59,18 +83,39 @@ func NewDefaultStackdriverClient(ctx context.Context, projectID, logID string) *
 }
 
 // NewLogger returns the new zap.Logger with stackdriver zapcore.Encoder.
-func NewLogger(ctx context.Context, lg *sdlogging.Logger, lv zapcore.Level) *zap.Logger {
-	enc := NewStackdriverEncoder(ctx, lg, NewStackdriverEncoderConfig())
-	ws := &WriteSyncer{lg: lg}
-	core := zapcore.NewCore(enc, ws, lv)
+func NewLogger(ctx context.Context, lg *sdlogging.Logger, atomlv zap.AtomicLevel, opts ...zap.Option) *zap.Logger {
+	var zopts []zap.Option
 
-	return zap.New(core)
+	cfg := NewStackdriverConfig()
+	switch lv := atomlv.Level(); lv {
+	default:
+		// nothig to do
+	case zap.DebugLevel:
+		zopts = append(zopts, zap.AddCallerSkip(0), zap.AddStacktrace(lv))
+	}
+	cfg.Level = atomlv
+
+	fn := func(core zapcore.Core) zapcore.Core {
+		enc := NewStackdriverEncoder(ctx, lg, NewStackdriverEncoderConfig())
+		ws := &WriteSyncer{lg: lg}
+		return zapcore.NewCore(enc, ws, atomlv.Level())
+	}
+	zopts = append(zopts, zap.WrapCore(fn))
+
+	zopts = append(zopts, opts...)
+	zl, err := cfg.Build(zopts...)
+	if err != nil {
+		panic(zl)
+	}
+
+	return zl
 }
 
 // NewStackdriverEncoder returns the stackdriver zapcore.Encoder.
 func NewStackdriverEncoder(ctx context.Context, lg *sdlogging.Logger, encoderConfig zapcore.EncoderConfig) zapcore.Encoder {
 	return &Encoder{
 		lg:            lg,
+		pool:          buffer.NewPool(),
 		Encoder:       zapcore.NewJSONEncoder(encoderConfig),
 		EncoderConfig: &encoderConfig,
 	}
@@ -134,6 +179,7 @@ func (e *Encoder) primitiveArrayEncoder() zapcore.PrimitiveArrayEncoder {
 func (e *Encoder) Clone() zapcore.Encoder {
 	return &Encoder{
 		lg:                e.lg,
+		pool:              e.pool,
 		SetReportLocation: e.SetReportLocation,
 		ctx:               e.ctx,
 		Encoder:           e.Encoder.Clone(),
