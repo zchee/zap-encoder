@@ -17,6 +17,16 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+func init() {
+	if err := zap.RegisterEncoder("stackdriver", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		return &Encoder{
+			Encoder: zapcore.NewJSONEncoder(cfg),
+		}, nil
+	}); err != nil {
+		panic(err)
+	}
+}
+
 const (
 	keyServiceContext        = "serviceContext"
 	keyContext               = "context"
