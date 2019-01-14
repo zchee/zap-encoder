@@ -33,45 +33,45 @@ func (sc *ServiceContext) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
-type Context struct {
+type LogContext struct {
 	User           string          `json:"user"`
 	HTTPRequest    *HTTPRequest    `json:"httpRequest"`
 	ReportLocation *ReportLocation `json:"reportLocation"`
 }
 
-func (c *Context) IsEmpty() bool {
-	return c.User == "" && c.HTTPRequest == nil && c.ReportLocation == nil
+func (lc *LogContext) IsEmpty() bool {
+	return lc.User == "" && lc.HTTPRequest == nil && lc.ReportLocation == nil
 }
 
-func (c *Context) Clone() *Context {
-	output := &Context{
-		User: c.User,
+func (lc *LogContext) Clone() *LogContext {
+	output := &LogContext{
+		User: lc.User,
 	}
 
-	if c.HTTPRequest != nil {
-		output.HTTPRequest = c.HTTPRequest.Clone()
+	if lc.HTTPRequest != nil {
+		output.HTTPRequest = lc.HTTPRequest.Clone()
 	}
 
-	if c.ReportLocation != nil {
-		output.ReportLocation = c.ReportLocation.Clone()
+	if lc.ReportLocation != nil {
+		output.ReportLocation = lc.ReportLocation.Clone()
 	}
 
 	return output
 }
 
-func (c *Context) MarshalLogObject(enc zapcore.ObjectEncoder) (err error) {
-	if c.User != "" {
-		enc.AddString("user", c.User)
+func (lc *LogContext) MarshalLogObject(enc zapcore.ObjectEncoder) (err error) {
+	if lc.User != "" {
+		enc.AddString("user", lc.User)
 	}
 
-	if c.HTTPRequest != nil {
-		if err = enc.AddObject("httpRequest", c.HTTPRequest); err != nil {
+	if lc.HTTPRequest != nil {
+		if err = enc.AddObject("httpRequest", lc.HTTPRequest); err != nil {
 			return
 		}
 	}
 
-	if c.ReportLocation != nil {
-		if err = enc.AddObject("reportLocation", c.ReportLocation); err != nil {
+	if lc.ReportLocation != nil {
+		if err = enc.AddObject("reportLocation", lc.ReportLocation); err != nil {
 			return
 		}
 	}
