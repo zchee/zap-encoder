@@ -27,30 +27,23 @@ func init() {
 	}
 }
 
-const (
-	keyServiceContext        = "serviceContext"
-	keyContext               = "context"
-	keyContextHTTPRequest    = "context.httpRequest"
-	keyContextUser           = "context.user"
-	keyContextReportLocation = "context.reportLocation"
-)
-
+// Encoder represents a zap.Encoder with stackdriver logging.
 type Encoder struct {
 	lg                *sdlogging.Logger
 	SetReportLocation bool
-	ctx               *Context
+	ctx               *LogContext
 
 	zapcore.Encoder
 	*zapcore.EncoderConfig
 }
 
-// NewStackdriverEncoder returns the stackdriver zapcore.Encoder.
-func NewStackdriverEncoder(ctx context.Context, encoderConfig zapcore.EncoderConfig, projectID, logID string) zapcore.Encoder {
-	client, err := sdlogging.NewClient(ctx, projectID)
+// NewDefaultStackdriverClient returns the stackdriver logging client with default options.
+func NewDefaultStackdriverClient(ctx context.Context, projectID, logID string) *sdlogging.Logger {
+	sd, err := sdlogging.NewClient(ctx, projectID)
 	if err != nil {
 		panic(fmt.Errorf("failed to create logging client: %+v", err))
 	}
-	client.OnError = func(error) {}
+	sd.OnError = func(error) {}
 
 	ctxFn := func() (context.Context, func()) {
 		ctx, span := trace.StartSpan(ctx, "this span will not be exported", trace.WithSampler(trace.NeverSample()))
@@ -62,10 +55,40 @@ func NewStackdriverEncoder(ctx context.Context, encoderConfig zapcore.EncoderCon
 		return ctx, afterCallFn
 	}
 
+	return sd.Logger(logID, sdlogging.ContextFunc(ctxFn))
+}
+
+// NewLogger returns the new zap.Logger with stackdriver zapcore.Encoder.
+func NewLogger(ctx context.Context, lg *sdlogging.Logger, lv zapcore.Level) *zap.Logger {
+	enc := NewStackdriverEncoder(ctx, lg, NewStackdriverEncoderConfig())
+	ws := &WriteSyncer{lg: lg}
+	core := zapcore.NewCore(enc, ws, lv)
+
+	return zap.New(core)
+}
+
+// NewStackdriverEncoder returns the stackdriver zapcore.Encoder.
+func NewStackdriverEncoder(ctx context.Context, lg *sdlogging.Logger, encoderConfig zapcore.EncoderConfig) zapcore.Encoder {
 	return &Encoder{
-		lg:            client.Logger(logID, sdlogging.ContextFunc(ctxFn)),
+		lg:            lg,
 		Encoder:       zapcore.NewJSONEncoder(encoderConfig),
 		EncoderConfig: &encoderConfig,
+	}
+}
+
+// NewStackdriverConfig returns the stackdriver encoder zap.Config.
+func NewStackdriverConfig() zap.Config {
+	return zap.Config{
+		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
+		Development: false,
+		Sampling: &zap.SamplingConfig{
+			Initial:    100,
+			Thereafter: 100,
+		},
+		Encoding:         "stackdriver",
+		EncoderConfig:    NewStackdriverEncoderConfig(),
+		OutputPaths:      []string{"stdout"},
+		ErrorOutputPaths: []string{"stdout"},
 	}
 }
 
@@ -100,22 +123,6 @@ func NewStackdriverEncoderConfig() zapcore.EncoderConfig {
 	}
 }
 
-// NewStackdriverConfig returns the stackdriver encoder zap.Config.
-func NewStackdriverConfig() zap.Config {
-	return zap.Config{
-		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
-		Development: false,
-		Sampling: &zap.SamplingConfig{
-			Initial:    100,
-			Thereafter: 100,
-		},
-		Encoding:         "stackdriver",
-		EncoderConfig:    NewStackdriverEncoderConfig(),
-		OutputPaths:      []string{"stdout"},
-		ErrorOutputPaths: []string{"stdout"},
-	}
-}
-
 func (e *Encoder) encoder() zapcore.Encoder {
 	return e.Encoder.(zapcore.Encoder)
 }
@@ -134,9 +141,9 @@ func (e *Encoder) Clone() zapcore.Encoder {
 	}
 }
 
-func (e *Encoder) cloneCtx() *Context {
+func (e *Encoder) cloneCtx() *LogContext {
 	if e.ctx == nil {
-		return &Context{}
+		return &LogContext{}
 	}
 
 	return e.ctx.Clone()
@@ -192,12 +199,12 @@ func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffe
 
 	fields, ctx := e.extractCtx(fields)
 	if ctx != nil {
-		fields = append(fields, LogContext(ctx))
+		fields = append(fields, WithContext(ctx))
 	}
 
 	rl := e.ReportLocationFromEntry(ent, fields)
 	if rl != nil {
-		fields = append(fields, LogReportLocation(rl))
+		fields = append(fields, WithReportLocation(rl))
 	}
 
 	buf, err := enc.EncodeEntry(ent, fields)
@@ -211,27 +218,35 @@ func (e *Encoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffe
 	return buf, err
 }
 
-func (e *Encoder) extractCtx(fields []zapcore.Field) ([]zapcore.Field, *Context) {
+const (
+	keyServiceContext        = "serviceContext"
+	keyContext               = "context"
+	keyContextHTTPRequest    = "context.httpRequest"
+	keyContextUser           = "context.user"
+	keyContextReportLocation = "context.reportLocation"
+)
+
+func (e *Encoder) extractCtx(fields []zapcore.Field) ([]zapcore.Field, *LogContext) {
 	output := []zapcore.Field{}
-	ctx := e.cloneCtx()
-	if ctx.IsEmpty() {
+	lc := e.cloneCtx()
+	if lc.IsEmpty() {
 		return fields, nil
 	}
 
 	for _, f := range fields {
 		switch f.Key {
 		case keyContextHTTPRequest:
-			ctx.HTTPRequest = f.Interface.(*HTTPRequest)
+			lc.HTTPRequest = f.Interface.(*HTTPRequest)
 		case keyContextReportLocation:
-			ctx.ReportLocation = f.Interface.(*ReportLocation)
+			lc.ReportLocation = f.Interface.(*ReportLocation)
 		case keyContextUser:
-			ctx.User = f.String
+			lc.User = f.String
 		default:
 			// output = append(output, f)
 		}
 	}
 
-	return output, ctx
+	return output, lc
 }
 
 func (e *Encoder) ReportLocationFromEntry(ent zapcore.Entry, fields []zapcore.Field) *ReportLocation {
