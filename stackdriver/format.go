@@ -137,18 +137,18 @@ func (r *ReportLocation) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	return nil
 }
 
-func LogContext(ctx *Context) zapcore.Field {
-	return zap.Object(keyContext, ctx)
+func WithContext(lc *LogContext) zapcore.Field {
+	return zap.Object(keyContext, lc)
 }
 
-func LogServiceContext(sc *ServiceContext) zapcore.Field {
+func WithServiceContext(sc *ServiceContext) zapcore.Field {
 	return zap.Object(keyServiceContext, sc)
 }
 
-func LogUser(user string) zapcore.Field {
+func WithUser(user string) zapcore.Field {
 	return zap.String(keyContextUser, user)
 }
 
-func LogReportLocation(loc *ReportLocation) zapcore.Field {
+func WithReportLocation(loc *ReportLocation) zapcore.Field {
 	return zap.Object(keyContextReportLocation, loc)
 }
