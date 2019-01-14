@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	testLogIDPrefix = "GO-LOGGING-CLIENT/TEST-LOG"
+	testLogIDPrefix = "go-logging-client/test-log"
 )
 
 func TestStackdriverEncodeEntry(t *testing.T) {
@@ -96,7 +96,8 @@ func TestStackdriverEncodeEntry(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			enc := stackdriver.NewStackdriverEncoder(ctx, stackdriver.NewStackdriverEncoderConfig(), testProjectID, testLogID)
+			lg := stackdriver.NewDefaultStackdriverClient(ctx, testProjectID, testLogID)
+			enc := stackdriver.NewStackdriverEncoder(ctx, lg, stackdriver.NewStackdriverEncoderConfig())
 			buf, err := enc.EncodeEntry(tt.ent, tt.fields)
 			if err != nil {
 				t.Errorf("Unexpected JSON encoding error: %+v", err)

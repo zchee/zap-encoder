@@ -21,7 +21,8 @@ func BenchmarkStackdriverEncoderLogMarshalerFunc(b *testing.B) {
 	uids := uid.NewSpace(testLogIDPrefix, nil)
 	testLogID := uids.New()
 
-	enc := stackdriver.NewStackdriverEncoder(ctx, stackdriver.NewStackdriverEncoderConfig(), testProjectID, testLogID)
+	lg := stackdriver.NewDefaultStackdriverClient(ctx, testProjectID, testLogID)
+	enc := stackdriver.NewStackdriverEncoder(ctx, lg, stackdriver.NewStackdriverEncoderConfig())
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
