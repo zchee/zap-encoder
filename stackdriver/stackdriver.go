@@ -254,3 +254,21 @@ func (e *Encoder) ReportLocationFromEntry(ent zapcore.Entry, fields []zapcore.Fi
 
 	return loc
 }
+
+// WriteSyncer represents a zapcore.WriteSyncer with stackdriver logging.
+type WriteSyncer struct {
+	lg *sdlogging.Logger
+}
+
+//pragma: compiler time checks whether the WriteSyncer implemented zapcore.WriteSyncer interface.
+var _ zapcore.WriteSyncer = (*WriteSyncer)(nil)
+
+// Write implements zapcore.WriteSyncer.
+func (ws *WriteSyncer) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
+// Sync implements zapcore.WriteSyncer.
+func (ws *WriteSyncer) Sync() error {
+	return ws.lg.Flush()
+}
